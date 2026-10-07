@@ -1,0 +1,211 @@
+"""Procesamiento local: corrección de texto, QR, imagen de firma y permisos PDF."""
+
+from dataclasses import dataclass
+from io import BytesIO
+import re
+import secrets
+
+from PIL import Image, ImageOps, UnidentifiedImageError
+import pymupdf
+import qrcode
+
+CODE = re.compile(r"QCP-[0-9]{4}-[0-9]{4}", re.IGNORECASE)
+MAX_PAGES = 100
+
+
+class CertificateError(ValueError):
+    pass
+
+
+@dataclass
+class PreparedPDF:
+    data: bytes
+    detected_codes: list[str]
+    final_code: str | None
+    replacements: int
+    warnings: list[str]
+    stamp_pages: list[int]
+    signature_included: bool
+
+
+def signature_png(data: bytes | None) -> bytes | None:
+    if not data:
+        return None
+    try:
+        with Image.open(BytesIO(data)) as image:
+            if image.format not in {"PNG", "JPEG"}:
+                raise CertificateError("La firma debe ser una imagen PNG o JPG.")
+            if image.width * image.height > 12_000_000:
+                raise CertificateError("La imagen de firma es demasiado grande.")
+            normalized = ImageOps.exif_transpose(image).convert("RGBA")
+            normalized.thumbnail((1600, 800))
+            output = BytesIO()
+            normalized.save(output, format="PNG")
+            return output.getvalue()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise CertificateError("No se pudo leer la imagen de firma.") from exc
+
+
+def _style(page: pymupdf.Page, area: pymupdf.Rect) -> tuple[float, tuple, str]:
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            for span in line["spans"]:
+                if pymupdf.Rect(span["bbox"]).intersects(area):
+                    color = span["color"]
+                    rgb = tuple(((color >> shift) & 255) / 255 for shift in (16, 8, 0))
+                    font = span["font"].lower()
+                    family = "tiro" if "times" in font else "cour" if "courier" in font else "helv"
+                    return float(span["size"]), rgb, family
+    return 10.0, (0, 0, 0), "helv"
+
+
+def _replace_code(doc: pymupdf.Document, old_code: str, new_code: str) -> int:
+    replacements = 0
+    for page in doc:
+        areas = page.search_for(old_code, quads=False)
+        # Do not redact text spanning rotated lines: an explicit error preserves the original.
+        for block in page.get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                if any(pymupdf.Rect(line["bbox"]).intersects(area) for area in areas):
+                    if abs(line["dir"][0] - 1) > 0.01 or abs(line["dir"][1]) > 0.01:
+                        raise CertificateError("El código está girado. Usa un PDF con texto horizontal para corregirlo.")
+        styled = [(area, *_style(page, area)) for area in areas]
+        for area, _, _, _ in styled:
+            page.add_redact_annot(area, fill=False, cross_out=False)
+        if areas:
+            page.apply_redactions(images=0, graphics=0, text=0)
+        for area, font_size, color, font in styled:
+            width = pymupdf.get_text_length(new_code, fontname=font, fontsize=font_size)
+            if width > area.width:
+                font_size *= area.width / width
+            if font_size < 5:
+                raise CertificateError("No hay espacio suficiente para reemplazar el código sin alterar el documento.")
+            ascender = pymupdf.Font(font).ascender
+            page.insert_text((area.x0, area.y0 + ascender * font_size), new_code,
+                             fontsize=font_size, fontname=font, color=color)
+            replacements += 1
+    if not replacements:
+        raise CertificateError("El código se detectó, pero no se pudo ubicar para corregirlo.")
+    return replacements
+
+
+def _occupied(page: pymupdf.Page) -> list[pymupdf.Rect]:
+    areas = [pymupdf.Rect(block[:4]) for block in page.get_text("blocks")]
+    areas.extend(pymupdf.Rect(info["bbox"]) for info in page.get_image_info())
+    areas.extend(pymupdf.Rect(drawing["rect"]) for drawing in page.get_drawings())
+    # Clickable annotations can also contain content or navigation.
+    areas.extend(pymupdf.Rect(link["from"]) for link in page.get_links())
+    if page.annots():
+        areas.extend(annotation.rect for annotation in page.annots())
+    return areas
+
+
+def _stamp_position(page: pymupdf.Page, with_signature: bool) -> pymupdf.Rect | None:
+    width, height = (250, 110) if with_signature else (180, 110)
+    bounds = page.rect
+    if bounds.width < width + 40 or bounds.height < height + 40 or page.rotation:
+        return None
+    occupied = _occupied(page)
+    # Prefer whitespace below a guide text; otherwise search empty footer space.
+    guides = ["verificar certificado", "código qr", "codigo qr", "validar certificado"]
+    candidates = []
+    for guide in guides:
+        for anchor in page.search_for(guide):
+            x = min(max(anchor.x0, 20), bounds.width - width - 20)
+            candidates.append(pymupdf.Rect(x, anchor.y1 + 8, x + width, anchor.y1 + height + 8))
+    for y in range(int(bounds.height - height - 20), max(20, int(bounds.height / 2)), -20):
+        for x in (bounds.width - width - 20, 20, (bounds.width - width) / 2):
+            candidates.append(pymupdf.Rect(x, y, x + width, y + height))
+    for candidate in candidates:
+        if not bounds.contains(candidate):
+            continue
+        padded = candidate + (-4, -4, 4, 4)
+        if not any(padded.intersects(area) for area in occupied):
+            return candidate
+    return None
+
+
+def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
+                signature: bytes | None = None) -> PreparedPDF:
+    requested_code = requested_code.strip().upper()
+    if requested_code and not CODE.fullmatch(requested_code):
+        raise CertificateError("El código debe tener el formato QCP-0000-0000.")
+    if not data.startswith(b"%PDF-"):
+        raise CertificateError("El archivo no es un PDF válido.")
+    try:
+        doc = pymupdf.open(stream=data, filetype="pdf")
+    except (pymupdf.FileDataError, RuntimeError) as exc:
+        raise CertificateError("El PDF está dañado o no se puede leer.") from exc
+    with doc:
+        if doc.needs_pass:
+            raise CertificateError("El PDF tiene contraseña. Sube una copia sin contraseña.")
+        if not 1 <= doc.page_count <= MAX_PAGES:
+            raise CertificateError(f"El PDF debe tener entre 1 y {MAX_PAGES} páginas.")
+        # Rewriting a digitally signed file invalidates its signature.
+        for page in doc:
+            if any(widget.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE for widget in (page.widgets() or [])):
+                raise CertificateError("Este PDF contiene un campo de firma digital. No se modificará para preservar su firma.")
+        original_text = "\n".join(page.get_text() for page in doc)
+        codes = list(dict.fromkeys(code.upper() for code in CODE.findall(original_text)))
+        warnings = []
+        replacements = 0
+        final_code = codes[0] if len(codes) == 1 else None
+        if not codes:
+            warnings.append("No se detectó un código en el texto. No se modificó el código; los PDF escaneados necesitan OCR previo.")
+        elif len(codes) > 1:
+            warnings.append("Se encontraron varios códigos distintos. Se conservaron todos sin cambios.")
+        elif requested_code and requested_code != codes[0]:
+            replacements = _replace_code(doc, codes[0], requested_code)
+            final_code = requested_code
+            resulting = "\n".join(page.get_text() for page in doc).upper()
+            if codes[0] in resulting or requested_code not in resulting:
+                raise CertificateError("No se pudo verificar el reemplazo completo del código.")
+        signature = signature_png(signature)
+        qr_buffer = BytesIO()
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=4, box_size=8)
+        qr.add_data(verification_url)
+        qr.make(fit=True)
+        qr.make_image(fill_color="black", back_color="white").save(qr_buffer, format="PNG")
+        original_pages = doc.page_count
+        stamped_pages = []
+        appended = False
+        for index in range(original_pages):
+            page = doc[index]
+            area = _stamp_position(page, bool(signature))
+            if area is None:
+                continue
+            _insert_stamp(page, area, qr_buffer.getvalue(), signature, verification_url)
+            stamped_pages.append(index + 1)
+        if not stamped_pages:
+            page = doc.new_page(width=595, height=842)
+            page.insert_text((40, 70), "Verificacion del certificado", fontsize=20)
+            page.insert_text((40, 100), "Escanea el QR para consultar el documento registrado en el portal.", fontsize=10)
+            _insert_stamp(page, pymupdf.Rect(40, 130, 290, 240), qr_buffer.getvalue(), signature, verification_url)
+            stamped_pages.append(doc.page_count)
+            appended = True
+        if appended:
+            warnings.append("No había espacio libre suficiente. El QR y la firma opcional se colocaron en una página adicional.")
+        elif len(stamped_pages) < original_pages:
+            warnings.append("El QR y la firma opcional se insertaron solo en las páginas con espacio libre.")
+        result = doc.tobytes(garbage=4, deflate=True,
+                             encryption=pymupdf.PDF_ENCRYPT_AES_256,
+                             owner_pw=secrets.token_hex(16), user_pw="",
+                             permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ |
+                             pymupdf.PDF_PERM_ACCESSIBILITY)
+        return PreparedPDF(result, codes, final_code, replacements, warnings, stamped_pages, bool(signature))
+
+
+def _insert_stamp(page: pymupdf.Page, area: pymupdf.Rect, qr: bytes,
+                  signature: bytes | None, url: str) -> None:
+    page.draw_rect(area, color=(0.85, 0.87, 0.89), fill=(1, 1, 1), width=0.6)
+    qr_area = pymupdf.Rect(area.x0 + 7, area.y0 + 7, area.x0 + 83, area.y0 + 83)
+    page.insert_image(qr_area, stream=qr)
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": qr_area, "uri": url})
+    if signature:
+        page.insert_image(pymupdf.Rect(area.x0 + 94, area.y0 + 10, area.x1 - 8, area.y0 + 65),
+                          stream=signature, keep_proportion=True)
+        page.insert_text((area.x0 + 94, area.y0 + 79), "Firma autorizada", fontsize=8)
+    else:
+        page.insert_text((area.x0 + 88, area.y0 + 35), "Consulta el", fontsize=9)
+        page.insert_text((area.x0 + 88, area.y0 + 49), "certificado", fontsize=9)
+    page.insert_text((area.x0 + 9, area.y0 + 99), "Verificar en el portal QCP", fontsize=8)

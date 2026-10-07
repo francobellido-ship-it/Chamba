@@ -1,0 +1,19 @@
+[project]
+name = "chamba-certificados"
+version = "0.1.0"
+description = "Portal QCP para preparar y verificar certificados PDF"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.118,<1",
+  "uvicorn>=0.37,<1",
+  "pymupdf>=1.26,<2",
+  "qrcode[pil]>=8.2,<9",
+  "python-multipart>=0.0.20,<0.1",
+  "pillow>=11,<13",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "httpx>=0.28,<1", "zxing-cpp>=2.3,<3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
