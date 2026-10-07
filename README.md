@@ -46,6 +46,14 @@ cd /workspace/Chamba
 
 Las pruebas generan PDFs ficticios; comprueban la carga, corrección en todas las páginas, conservación de contenido, decodificación del QR real, inserción de firma, permisos PDF, almacenamiento, descarga, autenticación y casos de error. No utilizan certificados de clientes.
 
+Con el servidor arrancado, comprueba además una carga y descarga reales:
+
+```sh
+.venv/bin/python scripts/smoke.py
+```
+
+Esta comprobación guarda un certificado ficticio marcado SIN VALIDEZ. Usa `--url https://tu-portal.example.com` para comprobar una publicación; lee la clave de acceso de `PORTAL_ACCESS_KEY` sin imprimirla.
+
 ## Publicar para obtener un enlace
 
 El repositorio y la publicación web son cosas distintas: subir este código a GitHub **no inicia un servidor web**. Esta aplicación necesita un servidor Python con disco persistente; GitHub Pages no ejecuta este backend.

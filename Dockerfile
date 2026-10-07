@@ -10,7 +10,8 @@ RUN --mount=type=secret,id=build_ca \
     && useradd --uid 10001 --create-home portal \
     && mkdir -p /data/certificates \
     && chown -R portal:portal /data
-COPY app ./app
+COPY --chown=portal:portal app ./app
+COPY --chown=portal:portal scripts/smoke.py ./scripts/smoke.py
 USER portal
 EXPOSE 8000
 CMD ["sh", "-c", "exec python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --no-proxy-headers"]
