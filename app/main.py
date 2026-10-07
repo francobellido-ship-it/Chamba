@@ -41,9 +41,10 @@ def local_url(url: str) -> bool:
 class RequestGuard:
     """Reject unauthorized uploads before parsing files; bound streamed request bodies."""
 
-    def __init__(self, app, access_key: str):
+    def __init__(self, app, access_key: str, uploads_enabled: bool):
         self.app = app
         self.access_key = access_key
+        self.uploads_enabled = uploads_enabled
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -51,6 +52,11 @@ class RequestGuard:
         is_upload = scope["method"] == "POST" and scope["path"] == "/api/certificates"
         if not is_upload:
             return await self.app(scope, receive, send)
+        if not self.uploads_enabled:
+            return await JSONResponse(
+                {"detail": "La preparación de certificados todavía no está habilitada. Contacta al administrador."},
+                status_code=503,
+            )(scope, receive, send)
         headers = dict(scope["headers"])
         if self.access_key:
             supplied = headers.get(b"x-portal-key", b"")
@@ -106,13 +112,20 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
         raise ValueError("PUBLIC_BASE_URL debe ser una URL http(s) sin ruta, credenciales, consulta ni fragmento.")
     key = access_key if access_key is not None else os.environ.get("PORTAL_ACCESS_KEY", "")
-    if not local_url(origin) and (parsed.scheme != "https" or len(key) < 16):
-        raise ValueError("Para publicar, usa una URL HTTPS y una PORTAL_ACCESS_KEY de al menos 16 caracteres.")
+    is_local = local_url(origin)
+    if not is_local and parsed.scheme != "https":
+        raise ValueError("PUBLIC_BASE_URL debe usar HTTPS para publicar el portal.")
+    uploads_enabled = is_local or len(key) >= 16
     quota = int(os.environ.get("MAX_STORAGE_MB", "1024")) * 1024 * 1024
 
     @asynccontextmanager
     async def lifespan(app):
         storage.mkdir(parents=True, exist_ok=True)
+        if not uploads_enabled:
+            logger.warning(
+                "La página pública está disponible, pero la preparación de certificados está deshabilitada. "
+                "Configura PORTAL_ACCESS_KEY con al menos 16 caracteres y vuelve a desplegar."
+            )
         app.state.executor = ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context("spawn"))
         app.state.processing = asyncio.Semaphore(2)
         app.state.storage_lock = asyncio.Lock()
@@ -121,7 +134,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
 
     app = FastAPI(title="Portal de certificados QCP", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
-    app.add_middleware(RequestGuard, access_key=key)
+    app.add_middleware(RequestGuard, access_key=key, uploads_enabled=uploads_enabled)
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -142,7 +155,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
 
     @app.get("/api/config")
     async def configuration():
-        return {"requiresAccessKey": bool(key), "localMode": local_url(origin),
+        return {"requiresAccessKey": bool(key) or not is_local, "uploadsEnabled": uploads_enabled, "localMode": is_local,
                 "maxPdfMB": 15, "maxSignatureMB": 2, "maxPages": 100}
 
     @app.get("/")

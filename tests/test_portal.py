@@ -167,11 +167,47 @@ def test_signature_field_is_not_silently_invalidated():
         prepare_pdf(data, "", "https://example.com/certificados/test")
 
 
-def test_public_deployment_requires_https_and_access_key(tmp_path):
+def test_public_deployment_requires_https(tmp_path):
     with pytest.raises(ValueError, match="HTTPS"):
         create_app(tmp_path, "http://example.com", "long-enough-access-key")
-    with pytest.raises(ValueError, match="PORTAL_ACCESS_KEY"):
-        create_app(tmp_path, "https://example.com", "")
+
+
+@pytest.mark.parametrize("key", ["", "short"])
+def test_public_page_starts_without_valid_key_and_blocks_all_uploads(tmp_path, key):
+    with TestClient(create_app(tmp_path, "https://example.com", key)) as client:
+        assert client.get("/").status_code == 200
+        assert client.get("/healthz").json() == {"status": "ok"}
+        assert client.get("/api/config").json()["uploadsEnabled"] is False
+        assert client.get("/api/config").json()["requiresAccessKey"] is True
+        assert upload(client).status_code == 503
+        response = client.post("/api/certificates", headers={"X-Portal-Key": key},
+                               files={"pdf": ("test.pdf", pdf_bytes(), "application/pdf")})
+        assert response.status_code == 503
+        assert not list(tmp_path.iterdir())
+
+
+def test_render_url_without_access_key_serves_public_page(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://qcp-example.onrender.com")
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("PORTAL_ACCESS_KEY", raising=False)
+    with TestClient(create_app(storage_dir=tmp_path)) as client:
+        assert client.get("/").status_code == 200
+        assert client.get("/api/config").json()["localMode"] is False
+        assert client.get("/api/config").json()["uploadsEnabled"] is False
+        assert upload(client).status_code == 503
+
+
+def test_existing_certificates_remain_public_when_uploads_are_disabled(tmp_path):
+    key = "test-key-at-least-16-chars"
+    with TestClient(create_app(tmp_path, "https://example.com", key)) as configured:
+        response = configured.post("/api/certificates", headers={"X-Portal-Key": key},
+                                   files={"pdf": ("test.pdf", pdf_bytes(), "application/pdf")})
+        assert response.status_code == 201
+        info = response.json()
+    with TestClient(create_app(tmp_path, "https://example.com", "")) as unconfigured:
+        assert unconfigured.get(f"/certificados/{info['id']}").status_code == 200
+        assert unconfigured.get(f"/api/certificates/{info['id']}").json() == info
+        assert hashlib.sha256(unconfigured.get(info["downloadUrl"]).content).hexdigest() == info["sha256"]
 
 
 def test_auth_guards_upload_but_allows_public_certificate_lookup(tmp_path):
@@ -184,6 +220,7 @@ def test_auth_guards_upload_but_allows_public_certificate_lookup(tmp_path):
         assert response.json()["verificationUrl"].startswith("https://certificates.example.com/")
         assert client.get(response.json()["downloadUrl"]).status_code == 200
         assert client.get("/api/config").json()["requiresAccessKey"] is True
+        assert client.get("/api/config").json()["uploadsEnabled"] is True
 
 
 def test_missing_and_malformed_certificate_id(client):

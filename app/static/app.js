@@ -50,7 +50,7 @@ function renderFiles() {
 }
 
 function addFiles(incoming) {
-  if (busy) return;
+  if (busy || !ready) return;
   const errors = [];
   for (const file of incoming) {
     if (!file.name.toLowerCase().endsWith(".pdf")) { errors.push(`${file.name}: selecciona un PDF.`); continue; }
@@ -171,9 +171,12 @@ async function initialize() {
     if (!response.ok) throw new Error("El portal no está disponible.");
     const config = await response.json();
     requiresKey = config.requiresAccessKey;
-    $("key-field").hidden = !requiresKey;
+    $("key-field").hidden = !requiresKey || !config.uploadsEnabled;
     $("local-notice").hidden = !config.localMode;
-    ready = true;
+    ready = config.uploadsEnabled === true;
+    $("setup-notice").hidden = ready;
+    $("pdf-files").disabled = !ready;
+    $("signature").disabled = !ready;
     renderFiles();
   } catch {
     message("No se pudo iniciar el portal. Recarga la página para volver a intentarlo.");
