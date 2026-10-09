@@ -13,21 +13,21 @@
   <main class="layout">
     <section class="intro">
       <span class="eyebrow">CERTIFICADOS, SIN COMPLICACIONES</span>
-      <h1>Prepara tus PDFs.<br><span>Compártelos con confianza.</span></h1>
-      <p class="lead">Corrige el código, añade una firma y genera un QR para consultar cada certificado desde un solo lugar.</p>
-      <ol class="steps"><li><span>01</span><div><strong>Selecciona tus documentos</strong><p>Uno o varios certificados en formato PDF.</p></div></li><li><span>02</span><div><strong>Revisa los códigos</strong><p>Cámbialos si hace falta y añade tu firma opcional.</p></div></li><li><span>03</span><div><strong>Descarga y comparte</strong><p>El PDF final incluye un QR de consulta.</p></div></li></ol>
-      <div class="info-note"><strong>Tu documento, con cuidado.</strong><p>Buscamos espacio libre para el QR. Si no hay suficiente, añadimos una página para conservar el contenido.</p></div>
+      <h1>De Excel a PDF.<br><span>Con tu firma y QR.</span></h1>
+      <p class="lead">Sube tus certificados en Excel y descarga los PDFs preparados para compartir y consultar.</p>
+      <ol class="steps"><li><span>01</span><div><strong>Selecciona tus Excel</strong><p>Uno o varios archivos .xlsx con la hoja Certificado.</p></div></li><li><span>02</span><div><strong>Revisa el código y la firma</strong><p>Conserva los actuales o cámbialos si hace falta.</p></div></li><li><span>03</span><div><strong>Descarga y comparte</strong><p>Cada certificado recibe su propio QR de consulta.</p></div></li></ol>
+      <div class="info-note"><strong>El formato de tu plantilla.</strong><p>Exportamos la hoja Certificado con sus valores guardados. El QR va junto a «Escanee este QR» y conservamos la firma, sin los sellos circulares.</p></div>
     </section>
     <section class="panel" aria-labelledby="panel-title">
-      <div class="panel-heading"><div><span class="eyebrow">NUEVO LOTE</span><h2 id="panel-title">Preparar certificados</h2></div><span class="pill">PDF</span></div>
+      <div class="panel-heading"><div><span class="eyebrow">NUEVO LOTE</span><h2 id="panel-title">Preparar certificados</h2></div><span class="pill">Excel → PDF</span></div>
       <div id="local-notice" class="notice" hidden>Modo de prueba: los QR solo funcionan en este servidor. Al publicar el portal, usarán su dirección pública.</div>
       <div id="setup-notice" class="notice" role="status" hidden>La página está disponible para consulta. La preparación de certificados todavía no está habilitada; contacta al administrador.</div>
       <div id="load-error" class="notice error" role="alert" hidden></div>
       <form id="certificate-form">
-        <label id="dropzone" class="dropzone" for="pdf-files"><svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true"><path d="M24 31V9m-8 8 8-8 8 8M9 30v10h30V30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Arrastra tus PDFs aquí</strong><span>o haz clic para seleccionarlos</span><small>Hasta 20 archivos por lote · 15 MB por PDF · 100 páginas</small></label>
-        <input id="pdf-files" class="visually-hidden" type="file" accept="application/pdf,.pdf" multiple>
+        <label id="dropzone" class="dropzone" for="document-files"><svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true"><path d="M24 31V9m-8 8 8-8 8 8M9 30v10h30V30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Arrastra tus Excel aquí</strong><span>o haz clic para seleccionarlos · también admite PDF</span><small>Hasta 20 archivos por lote · 15 MB por archivo · 100 páginas</small></label>
+        <input id="document-files" class="visually-hidden" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.pdf,application/pdf" multiple>
         <div id="file-list" class="file-list" aria-live="polite"></div>
-        <div class="field"><label for="signature">Imagen de firma <span class="optional">opcional</span></label><input id="signature" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg"><small>PNG o JPG, máximo 2 MB. Usa una firma que tengas autorización para aplicar.</small></div>
+        <div class="field"><label for="signature">Reemplazar la firma <span class="optional">opcional</span></label><input id="signature" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg"><small>Si la firma ya está en el Excel, no necesitas subirla. Para reemplazarla en todo el lote, usa un PNG o JPG autorizado de hasta 2 MB.</small></div>
         <div class="disclaimer">La firma es una imagen, no una firma digital. El PDF limita la edición en lectores compatibles. Cualquier persona con el enlace o el QR puede consultar el certificado.</div>
         <button id="submit" class="primary-button" type="submit" disabled>Preparar certificados <span aria-hidden="true">→</span></button>
         <p id="progress" class="progress" role="status" aria-live="polite"></p>

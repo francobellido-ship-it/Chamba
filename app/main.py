@@ -18,7 +18,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.pdf import CertificateError, prepare_pdf
+from app.pdf import CertificateError
+from app.documents import prepare_document
 
 STATIC = Path(__file__).parent / "static"
 MAX_PDF_BYTES = 15 * 1024 * 1024
@@ -38,7 +39,7 @@ def local_url(url: str) -> bool:
 
 
 class RequestGuard:
-    """Bound streamed upload request bodies before processing PDFs."""
+    """Bound streamed upload request bodies before processing certificates."""
 
     def __init__(self, app):
         self.app = app
@@ -83,12 +84,12 @@ async def read_upload(file: UploadFile, limit: int) -> bytes:
     return b"".join(chunks)
 
 
-def filename_safe(name: str | None) -> str:
+def filename_safe(name: str | None, source_type: str = "pdf") -> str:
     name = (name or "CERTIFICADO.pdf").replace("\\", "/").split("/")[-1]
     name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip()
-    if not name.lower().endswith(".pdf"):
-        raise HTTPException(422, "El archivo debe tener extensión .pdf.")
-    return name[:180 - 4].removesuffix(".pdf").removesuffix(".PDF") + ".pdf" if len(name) > 180 else name
+    if not name.lower().endswith(f".{source_type}"):
+        raise HTTPException(422, f"El archivo debe tener extensión .{source_type}.")
+    return name[:-(len(source_type) + 1)][:176] + ".pdf"
 
 
 def create_app(storage_dir: Path | None = None, public_url: str | None = None) -> FastAPI:
@@ -106,8 +107,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None) -
     @asynccontextmanager
     async def lifespan(app):
         storage.mkdir(parents=True, exist_ok=True)
-        app.state.executor = ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context("spawn"))
-        app.state.processing = asyncio.Semaphore(2)
+        app.state.executor = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+        app.state.processing = asyncio.Semaphore(1)
         app.state.storage_lock = asyncio.Lock()
         yield
         app.state.executor.shutdown(wait=True, cancel_futures=True)
@@ -136,7 +137,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None) -
     @app.get("/api/config")
     async def configuration():
         return {"requiresAccessKey": False, "uploadsEnabled": True, "localMode": is_local,
-                "maxPdfMB": 15, "maxSignatureMB": 2, "maxPages": 100}
+                "maxPdfMB": 15, "maxExcelMB": 15, "maxSignatureMB": 2, "maxPages": 100,
+                "inputFormats": ["xlsx", "pdf"]}
 
     @app.get("/")
     async def home():
@@ -166,12 +168,16 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None) -
                             filename=info["filename"], headers={"Cache-Control": "no-store"})
 
     @app.post("/api/certificates", status_code=201)
-    async def create_certificate(pdf: UploadFile = File(...), codigoCorrecto: str = Form(""),
+    async def create_certificate(excel: UploadFile | None = File(None), pdf: UploadFile | None = File(None), codigoCorrecto: str = Form(""),
                                  firma: UploadFile | None = File(None)):
-        filename = filename_safe(pdf.filename)
+        if (excel is None) == (pdf is None):
+            raise HTTPException(422, "Sube un Excel .xlsx o un PDF por solicitud.")
+        source_type = "xlsx" if excel else "pdf"
+        document = excel or pdf
+        filename = filename_safe(document.filename, source_type)
         if len(codigoCorrecto) > 40:
             raise HTTPException(422, "El código debe tener el formato QCP-0000-0000.")
-        data = await read_upload(pdf, MAX_PDF_BYTES)
+        data = await read_upload(document, MAX_PDF_BYTES)
         signature = await read_upload(firma, MAX_SIGNATURE_BYTES) if firma else None
         certificate_id = str(uuid4())
         verification_url = f"{origin}/certificados/{certificate_id}"
@@ -181,15 +187,15 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None) -
             raise HTTPException(429, "El portal está procesando otros archivos. Inténtalo nuevamente en unos segundos.")
         try:
             result = await asyncio.get_running_loop().run_in_executor(
-                app.state.executor, prepare_pdf, data, codigoCorrecto, verification_url, signature)
+                app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature)
         except CertificateError as exc:
             raise HTTPException(422, str(exc)) from exc
         except Exception as exc:
             logger.exception("Error al procesar un certificado")
-            raise HTTPException(500, "No se pudo procesar el PDF. Revisa el archivo o contacta al administrador.") from exc
+            raise HTTPException(500, "No se pudo procesar el certificado. Revisa el archivo o contacta al administrador.") from exc
         finally:
             app.state.processing.release()
-        info = {"id": certificate_id, "filename": filename,
+        info = {"id": certificate_id, "filename": filename, "sourceType": source_type,
                 "createdAt": datetime.now(timezone.utc).isoformat(),
                 "detectedCodes": result.detected_codes, "finalCode": result.final_code,
                 "replacements": result.replacements, "warnings": result.warnings,

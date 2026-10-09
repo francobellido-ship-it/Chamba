@@ -52,7 +52,7 @@ function addFiles(incoming) {
   if (busy || !ready) return;
   const errors = [];
   for (const file of incoming) {
-    if (!file.name.toLowerCase().endsWith(".pdf")) { errors.push(`${file.name}: selecciona un PDF.`); continue; }
+    if (!/\.(xlsx|pdf)$/i.test(file.name)) { errors.push(`${file.name}: selecciona un Excel .xlsx o un PDF.`); continue; }
     if (file.size > 15 * 1024 * 1024) { errors.push(`${file.name}: supera los 15 MB.`); continue; }
     if (files.length >= 20) { errors.push("El lote admite hasta 20 archivos."); break; }
     if (files.some((other) => other.name === file.name && other.size === file.size && other.lastModified === file.lastModified)) continue;
@@ -62,7 +62,7 @@ function addFiles(incoming) {
   renderFiles();
 }
 
-$("pdf-files").addEventListener("change", (event) => { addFiles(event.target.files); event.target.value = ""; });
+$("document-files").addEventListener("change", (event) => { addFiles(event.target.files); event.target.value = ""; });
 const dropzone = $("dropzone");
 for (const eventName of ["dragenter", "dragover"]) {
   dropzone.addEventListener(eventName, (event) => { event.preventDefault(); if (!busy) dropzone.classList.add("dragover"); });
@@ -122,7 +122,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
   message("");
   busy = true;
   renderFiles();
-  $("pdf-files").disabled = true;
+  $("document-files").disabled = true;
   $("signature").disabled = true;
   $("submit").textContent = "Preparando…";
   $("result-list").replaceChildren();
@@ -134,7 +134,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
     for (const [index, file] of batch.entries()) {
       $("progress").textContent = `Procesando ${index + 1} de ${batch.length}: ${file.name}`;
       const form = new FormData();
-      form.append("pdf", file);
+      form.append(/\.xlsx$/i.test(file.name) ? "excel" : "pdf", file);
       form.append("codigoCorrecto", (codes.get(file) || "").trim());
       if (signature) form.append("firma", signature);
       try {
@@ -152,7 +152,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
   } finally {
     files = failed;
     busy = false;
-    $("pdf-files").disabled = false;
+    $("document-files").disabled = false;
     $("signature").disabled = false;
     $("submit").textContent = failed.length ? "Reintentar archivos pendientes →" : "Preparar certificados →";
     $("progress").textContent = `${completed} de ${batch.length} certificados preparados.${failed.length ? " Los archivos pendientes siguen seleccionados." : " Ya puedes descargarlos."}`;
@@ -168,7 +168,7 @@ async function initialize() {
     $("local-notice").hidden = !config.localMode;
     ready = config.uploadsEnabled === true;
     $("setup-notice").hidden = ready;
-    $("pdf-files").disabled = !ready;
+    $("document-files").disabled = !ready;
     $("signature").disabled = !ready;
     renderFiles();
   } catch {

@@ -126,7 +126,7 @@ def _stamp_position(page: pymupdf.Page, with_signature: bool) -> pymupdf.Rect | 
 
 
 def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
-                signature: bytes | None = None) -> PreparedPDF:
+                signature: bytes | None = None, template: bool = False) -> PreparedPDF:
     requested_code = requested_code.strip().upper()
     if requested_code and not CODE.fullmatch(requested_code):
         raise CertificateError("El código debe tener el formato QCP-0000-0000.")
@@ -169,13 +169,21 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         original_pages = doc.page_count
         stamped_pages = []
         appended = False
-        for index in range(original_pages):
-            page = doc[index]
-            area = _stamp_position(page, bool(signature))
-            if area is None:
-                continue
-            _insert_stamp(page, area, qr_buffer.getvalue(), signature, verification_url)
-            stamped_pages.append(index + 1)
+        if template:
+            for index, page in enumerate(doc):
+                for guide in page.search_for("Escanee este QR"):
+                    _insert_template_stamp(page, guide, qr_buffer.getvalue(), signature, verification_url)
+                    stamped_pages.append(index + 1)
+            if not stamped_pages:
+                raise CertificateError("El PDF convertido no contiene el texto Escanee este QR. Revisa la plantilla y el área de impresión.")
+        else:
+            for index in range(original_pages):
+                page = doc[index]
+                area = _stamp_position(page, bool(signature))
+                if area is None:
+                    continue
+                _insert_stamp(page, area, qr_buffer.getvalue(), signature, verification_url)
+                stamped_pages.append(index + 1)
         if not stamped_pages:
             page = doc.new_page(width=595, height=842)
             page.insert_text((40, 70), "Verificacion del certificado", fontsize=20)
@@ -185,7 +193,7 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
             appended = True
         if appended:
             warnings.append("No había espacio libre suficiente. El QR y la firma opcional se colocaron en una página adicional.")
-        elif len(stamped_pages) < original_pages:
+        elif not template and len(stamped_pages) < original_pages:
             warnings.append("El QR y la firma opcional se insertaron solo en las páginas con espacio libre.")
         result = doc.tobytes(garbage=4, deflate=True,
                              encryption=pymupdf.PDF_ENCRYPT_AES_256,
@@ -193,6 +201,35 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
                              permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ |
                              pymupdf.PDF_PERM_ACCESSIBILITY)
         return PreparedPDF(result, codes, final_code, replacements, warnings, stamped_pages, bool(signature))
+
+
+def _insert_template_stamp(page: pymupdf.Page, guide: pymupdf.Rect, qr: bytes,
+                           signature: bytes | None, url: str) -> None:
+    """Place the QR beside the printed guide and the signature beside its author."""
+    if page.rotation:
+        raise CertificateError("La hoja Certificado debe imprimirse sin giro de página.")
+    qr_area = pymupdf.Rect(guide.x0 - 72, guide.y0 + 2.2, guide.x0 - 6, guide.y0 + 68.2)
+    areas = [qr_area]
+    signature_area = None
+    if signature:
+        authors = page.search_for("Autorizado y firmador por:") or page.search_for("Autorizado y firmado por:")
+        if len(authors) != 1:
+            raise CertificateError("La plantilla necesita un único texto Autorizado y firmado por: para colocar la firma.")
+        author = authors[0]
+        signature_area = pymupdf.Rect(author.x0 - 82, author.y0 + 7.4, author.x0 - 4, author.y0 + 52.4)
+        areas.append(signature_area)
+    occupied = [pymupdf.Rect(span["bbox"]) for block in page.get_text("dict")["blocks"]
+                for line in block.get("lines", []) for span in line["spans"]]
+    # The full-page letterhead is expected beneath the certificate content.
+    occupied.extend(pymupdf.Rect(info["bbox"]) for info in page.get_image_info()
+                    if pymupdf.Rect(info["bbox"]).get_area() < page.rect.get_area() * 0.9)
+    for area in areas:
+        if not page.rect.contains(area) or any(area.intersects(other) for other in occupied):
+            raise CertificateError("No hay espacio libre al lado del texto guía. Revisa la posición del QR y la firma en la plantilla.")
+    page.insert_image(qr_area, stream=qr)
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": qr_area, "uri": url})
+    if signature_area is not None:
+        page.insert_image(signature_area, stream=signature, keep_proportion=True)
 
 
 def _insert_stamp(page: pymupdf.Page, area: pymupdf.Rect, qr: bytes,

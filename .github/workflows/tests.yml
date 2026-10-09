@@ -14,5 +14,6 @@ jobs:
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v6
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-calc fonts-liberation fonts-dejavu-core fonts-crosextra-carlito
       - run: uv sync --locked
       - run: uv run --no-sync python -m pytest -q
