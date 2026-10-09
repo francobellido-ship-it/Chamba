@@ -12,6 +12,8 @@ function message(text) {
 
 function renderFiles() {
   $("file-list").replaceChildren();
+  $("selection-summary").hidden = files.length === 0;
+  $("file-count").textContent = `${files.length} ${files.length === 1 ? "archivo seleccionado" : "archivos seleccionados"}`;
   files.forEach((file, index) => {
     const row = document.createElement("div");
     row.className = "file-row";
@@ -105,7 +107,19 @@ function addResult(file, result, error) {
     verify.href = `/certificados/${result.id}`;
     verify.target = "_blank";
     verify.rel = "noopener";
-    verify.textContent = "Ver consulta ↗";
+    verify.textContent = "Ver consulta";
+    const externalIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    externalIcon.setAttribute("viewBox", "0 0 24 24");
+    externalIcon.setAttribute("width", "13");
+    externalIcon.setAttribute("height", "13");
+    externalIcon.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M7 17 17 7M7 7h10v10");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.8");
+    externalIcon.append(path);
+    verify.append(externalIcon);
     actions.append(download, verify);
     card.append(actions);
   }
@@ -154,7 +168,10 @@ $("certificate-form").addEventListener("submit", async (event) => {
     busy = false;
     $("document-files").disabled = false;
     $("signature").disabled = false;
-    $("submit").textContent = failed.length ? "Reintentar archivos pendientes →" : "Preparar certificados →";
+    const arrow = document.createElement("span");
+    arrow.textContent = "→";
+    arrow.setAttribute("aria-hidden", "true");
+    $("submit").replaceChildren(document.createTextNode(failed.length ? "Reintentar archivos pendientes" : "Preparar certificados"), arrow);
     $("progress").textContent = `${completed} de ${batch.length} certificados preparados.${failed.length ? " Los archivos pendientes siguen seleccionados." : " Ya puedes descargarlos."}`;
     renderFiles();
   }

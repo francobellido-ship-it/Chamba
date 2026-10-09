@@ -3,38 +3,91 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>QCP · Portal de certificados</title>
+  <meta name="description" content="Portal de Quality Control Perú S.A.C. para preparar certificados PDF desde Excel, con firma y QR de consulta.">
+  <title>Quality Control Perú · Portal de certificados</title>
   <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header class="site-header"><a class="brand" href="/"><img src="/static/logo.svg" alt="" width="38" height="38"><span>QCP<span class="brand-sub">Portal de certificados</span></span></a><span class="header-tag">Gestión documental</span></header>
+  <a class="skip-link" href="#preparar">Ir a la carga de archivos</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="/" aria-label="Quality Control Perú S.A.C. · Inicio">
+        <span class="brand-symbol" aria-hidden="true"></span>
+        <span class="brand-name">Quality Control <span>Perú S.A.C.</span><span class="brand-sub">Laboratorio de calibración</span></span>
+      </a>
+      <nav class="header-nav" aria-label="Navegación principal">
+        <a class="nav-active" href="#preparar">Preparar certificados</a>
+        <a href="#guia">Cómo funciona</a>
+      </nav>
+      <span class="header-tag"><span class="tag-dot" aria-hidden="true"></span>Portal de certificados</span>
+    </div>
+  </header>
   <main class="layout">
-    <section class="intro">
-      <span class="eyebrow">CERTIFICADOS, SIN COMPLICACIONES</span>
-      <h1>De Excel a PDF.<br><span>Con tu firma y QR.</span></h1>
-      <p class="lead">Sube tus certificados en Excel y descarga los PDFs preparados para compartir y consultar.</p>
-      <ol class="steps"><li><span>01</span><div><strong>Selecciona tus Excel</strong><p>Uno o varios archivos .xlsx con la hoja Certificado.</p></div></li><li><span>02</span><div><strong>Revisa el código y la firma</strong><p>Conserva los actuales o cámbialos si hace falta.</p></div></li><li><span>03</span><div><strong>Descarga y comparte</strong><p>Cada certificado recibe su propio QR de consulta.</p></div></li></ol>
-      <div class="info-note"><strong>El formato de tu plantilla.</strong><p>Exportamos la hoja Certificado con sus valores guardados. El QR va junto a «Escanee este QR» y conservamos la firma, sin los sellos circulares.</p></div>
-    </section>
-    <section class="panel" aria-labelledby="panel-title">
-      <div class="panel-heading"><div><span class="eyebrow">NUEVO LOTE</span><h2 id="panel-title">Preparar certificados</h2></div><span class="pill">Excel → PDF</span></div>
-      <div id="local-notice" class="notice" hidden>Modo de prueba: los QR solo funcionan en este servidor. Al publicar el portal, usarán su dirección pública.</div>
-      <div id="setup-notice" class="notice" role="status" hidden>La página está disponible para consulta. La preparación de certificados todavía no está habilitada; contacta al administrador.</div>
-      <div id="load-error" class="notice error" role="alert" hidden></div>
-      <form id="certificate-form">
-        <label id="dropzone" class="dropzone" for="document-files"><svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true"><path d="M24 31V9m-8 8 8-8 8 8M9 30v10h30V30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Arrastra tus Excel aquí</strong><span>o haz clic para seleccionarlos · también admite PDF</span><small>Hasta 20 archivos por lote · 15 MB por archivo · 100 páginas</small></label>
-        <input id="document-files" class="visually-hidden" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.pdf,application/pdf" multiple>
-        <div id="file-list" class="file-list" aria-live="polite"></div>
-        <div class="field"><label for="signature">Reemplazar la firma <span class="optional">opcional</span></label><input id="signature" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg"><small>Si la firma ya está en el Excel, no necesitas subirla. Para reemplazarla en todo el lote, usa un PNG o JPG autorizado de hasta 2 MB.</small></div>
-        <div class="disclaimer">La firma es una imagen, no una firma digital. El PDF limita la edición en lectores compatibles. Cualquier persona con el enlace o el QR puede consultar el certificado.</div>
-        <button id="submit" class="primary-button" type="submit" disabled>Preparar certificados <span aria-hidden="true">→</span></button>
-        <p id="progress" class="progress" role="status" aria-live="polite"></p>
-      </form>
-      <section id="results" class="results" aria-label="Resultados" hidden><h3>Tu lote</h3><div id="result-list"></div></section>
+    <div class="page-heading"><span>GESTIÓN DOCUMENTAL</span><span class="page-heading-detail">Una herramienta para el equipo QCP</span></div>
+    <div class="workspace">
+      <section class="intro" aria-labelledby="welcome-title">
+        <div class="hero-grid" aria-hidden="true"></div>
+        <div class="hero-content">
+          <span class="hero-eyebrow"><span aria-hidden="true"></span>QUALITY CONTROL PERÚ</span>
+          <h1 id="welcome-title">Certificados,<br>listos para<br> <span>compartir.</span></h1>
+          <p class="lead">De tu plantilla Excel a un PDF con firma y QR. Todo en un solo lugar.</p>
+          <div class="hero-formats" aria-label="Convierte Excel a PDF con QR"><span>Excel</span><span class="format-arrow" aria-hidden="true">→</span><span>PDF + QR</span></div>
+        </div>
+        <div class="document-art" aria-hidden="true">
+          <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div>
+          <div class="art-sheet sheet-back"></div>
+          <div class="art-sheet sheet-front">
+            <div class="art-document-brand"><span class="brand-symbol"></span><span>QUALITY CONTROL<br>PERÚ S.A.C.</span></div>
+            <div class="art-rule"></div>
+            <div class="art-line art-line-title"></div><div class="art-line"></div><div class="art-line art-line-short"></div>
+            <div class="art-table"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <svg class="art-check" viewBox="0 0 24 24" width="24" height="24"><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="art-label"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 3h9l5 5v13H5zM14 3v6h5M8 13h8M8 17h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>Tu plantilla, en PDF</div>
+        </div>
+        <div class="hero-bottom"><span class="hero-line" aria-hidden="true"></span>Precisión en cada documento.</div>
+      </section>
+      <section id="preparar" class="panel upload-panel" aria-labelledby="panel-title">
+        <div class="panel-heading"><div><span class="eyebrow">NUEVO LOTE</span><h2 id="panel-title">Preparar certificados</h2></div><span class="pill">Excel → PDF</span></div>
+        <p class="panel-description">Selecciona tus archivos y prepara el lote en unos pasos.</p>
+        <div id="local-notice" class="notice" hidden>Modo de prueba: los QR solo funcionan en este servidor. Al publicar el portal, usarán su dirección pública.</div>
+        <div id="setup-notice" class="notice" role="status" hidden>La página está disponible para consulta. La preparación de certificados todavía no está habilitada; contacta al administrador.</div>
+        <div id="load-error" class="notice error" role="alert" hidden></div>
+        <form id="certificate-form">
+          <label id="dropzone" class="dropzone" for="document-files">
+            <input id="document-files" class="visually-hidden" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.pdf,application/pdf" multiple aria-label="Seleccionar archivos Excel o PDF">
+            <span class="upload-icon"><svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><path d="M16 21V6m-6 6 6-6 6 6M6 22v5h20v-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <strong>Arrastra tus Excel aquí</strong><span class="dropzone-hint">o elige los archivos desde tu equipo</span>
+            <span class="select-files">Seleccionar archivos <span aria-hidden="true">＋</span></span>
+            <small>Formato .xlsx · También puedes cargar PDF</small>
+          </label>
+          <div class="upload-limits"><span>Hasta 20 archivos por lote</span><span>15 MB por archivo · 100 páginas</span></div>
+          <div id="selection-summary" class="selection-summary" hidden><span id="file-count" role="status"></span><span>Revisa los códigos antes de continuar</span></div>
+          <div id="file-list" class="file-list" aria-live="polite"></div>
+          <details class="signature-options">
+            <summary><span class="option-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="m14 5 5 5M4 20l4-1 12-12a2.1 2.1 0 0 0-3-3L5 16zM12 20h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span>Firma del certificado <span class="optional">Opcional</span></span><svg class="option-chevron" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+            <div class="signature-body"><p>Conservamos la firma que ya está en tu Excel. Si necesitas reemplazarla, carga una imagen autorizada para todo el lote.</p><div class="field"><label for="signature">Reemplazar la firma</label><input id="signature" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg"><small>PNG o JPG · Máximo 2 MB</small></div></div>
+          </details>
+          <p class="signature-hint">Si tu Excel ya tiene firma, puedes continuar directamente.</p>
+          <button id="submit" class="primary-button" type="submit" disabled>Preparar certificados <span aria-hidden="true">→</span></button>
+          <p class="submit-hint">Cada archivo tendrá su propio QR de consulta.</p>
+          <p id="progress" class="progress" role="status" aria-live="polite"></p>
+        </form>
+        <section id="results" class="results" aria-label="Resultados" hidden><div class="results-heading"><h3>Certificados del lote</h3><span>Descarga y comparte</span></div><div id="result-list"></div></section>
+      </section>
+    </div>
+    <section id="guia" class="guide" aria-labelledby="guide-title">
+      <div class="guide-heading"><h2 id="guide-title">Tu flujo de trabajo, más simple.</h2><span>Tres pasos para preparar tu lote</span></div>
+      <ol class="steps">
+        <li><span class="step-number">01</span><div><h3>Selecciona tus archivos</h3><p>Usa tu plantilla QCP con la hoja <strong>Certificado</strong>. Puedes cargar varios Excel a la vez.</p></div></li>
+        <li><span class="step-number">02</span><div><h3>Revisa el código y la firma</h3><p>Conserva los datos del Excel o indica un nuevo código. Reemplazar la firma es opcional.</p></div></li>
+        <li><span class="step-number">03</span><div><h3>Descarga y comparte</h3><p>Obtén un PDF por archivo. Su QR abre la consulta y la descarga de ese certificado.</p></div></li>
+      </ol>
+      <p class="disclaimer">La firma se incorpora como imagen; no es una firma digital. Cualquier persona con el enlace o el QR puede consultar y descargar el certificado.</p>
     </section>
   </main>
-  <footer>QCP · Portal de certificados <span>Corrección · Firma · Consulta por QR</span></footer>
+  <footer class="site-footer"><div><strong>Quality Control Perú S.A.C.</strong><span>Portal de certificados</span></div><span>Excel · Firma · Consulta por QR</span></footer>
 </body>
 </html>

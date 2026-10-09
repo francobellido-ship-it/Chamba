@@ -4,6 +4,8 @@ Aplicación web en español para convertir certificados Excel a PDF por lotes, c
 
 ![Vista del portal en desarrollo](docs/portal.png)
 
+La pantalla usa el nombre y el emblema de **Quality Control Perú S.A.C.**, tomados del membrete de la plantilla proporcionada. Incluye una guía de tres pasos, contador de archivos, firma opcional desplegable y presentación adaptada a computadora y celular. La página de consulta comparte esa identidad visual. La ilustración del inicio es decorativa; los certificados se generan desde los archivos cargados.
+
 ## Qué hace
 
 - Recibe hasta 20 archivos `.xlsx` por lote desde el navegador, procesados uno a uno. También conserva la entrada PDF de la versión anterior. Cada archivo admite 15 MB y el resultado hasta 100 páginas.
