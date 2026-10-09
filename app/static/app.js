@@ -104,10 +104,10 @@ function addResult(file, result, error) {
     download.textContent = "Descargar PDF ↓";
     const verify = document.createElement("a");
     // Relative URL keeps local development usable if localhost and 127.0.0.1 differ.
-    verify.href = `/certificados/${result.id}`;
+    verify.href = result.driveUrl || `/certificados/${result.id}`;
     verify.target = "_blank";
     verify.rel = "noopener";
-    verify.textContent = "Ver consulta";
+    verify.textContent = result.driveUrl ? "Abrir en Drive" : "Ver consulta";
     const externalIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     externalIcon.setAttribute("viewBox", "0 0 24 24");
     externalIcon.setAttribute("width", "13");
@@ -185,6 +185,9 @@ async function initialize() {
     $("local-notice").hidden = !config.localMode;
     ready = config.uploadsEnabled === true;
     $("setup-notice").hidden = ready;
+    if (!ready && config.storageBackend === "drive") {
+      $("setup-notice").textContent = "La conexión con Google Drive está pendiente. Contacta al administrador para habilitar la preparación de certificados.";
+    }
     $("document-files").disabled = !ready;
     $("signature").disabled = !ready;
     renderFiles();
