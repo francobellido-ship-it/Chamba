@@ -1,4 +1,4 @@
-"""Comprueba un servidor real con un PDF ficticio; no imprime claves de acceso."""
+"""Comprueba el portal público con un PDF ficticio."""
 
 import argparse
 import hashlib
@@ -29,8 +29,6 @@ def main():
             'filename="PRUEBA-SIN-VALIDEZ.pdf"\r\nContent-Type: application/pdf\r\n\r\n').encode()
     body += data + f"\r\n--{boundary}--\r\n".encode()
     headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
-    if os.environ.get("PORTAL_ACCESS_KEY"):
-        headers["X-Portal-Key"] = os.environ["PORTAL_ACCESS_KEY"]
     request = urllib.request.Request(base + "/api/certificates", data=body, headers=headers)
     with urllib.request.urlopen(request, timeout=90) as response:
         assert response.status == 201

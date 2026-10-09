@@ -10,7 +10,6 @@ import multiprocessing
 import os
 from pathlib import Path
 import re
-import secrets
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -39,12 +38,10 @@ def local_url(url: str) -> bool:
 
 
 class RequestGuard:
-    """Reject unauthorized uploads before parsing files; bound streamed request bodies."""
+    """Bound streamed upload request bodies before processing PDFs."""
 
-    def __init__(self, app, access_key: str, uploads_enabled: bool):
+    def __init__(self, app):
         self.app = app
-        self.access_key = access_key
-        self.uploads_enabled = uploads_enabled
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -52,16 +49,7 @@ class RequestGuard:
         is_upload = scope["method"] == "POST" and scope["path"] == "/api/certificates"
         if not is_upload:
             return await self.app(scope, receive, send)
-        if not self.uploads_enabled:
-            return await JSONResponse(
-                {"detail": "La preparación de certificados todavía no está habilitada. Contacta al administrador."},
-                status_code=503,
-            )(scope, receive, send)
         headers = dict(scope["headers"])
-        if self.access_key:
-            supplied = headers.get(b"x-portal-key", b"")
-            if not secrets.compare_digest(supplied, self.access_key.encode()):
-                return await JSONResponse({"detail": "La clave de acceso no es correcta."}, status_code=401)(scope, receive, send)
         try:
             length = int(headers.get(b"content-length", b"0"))
         except ValueError:
@@ -103,29 +91,21 @@ def filename_safe(name: str | None) -> str:
     return name[:180 - 4].removesuffix(".pdf").removesuffix(".PDF") + ".pdf" if len(name) > 180 else name
 
 
-def create_app(storage_dir: Path | None = None, public_url: str | None = None,
-               access_key: str | None = None) -> FastAPI:
+def create_app(storage_dir: Path | None = None, public_url: str | None = None) -> FastAPI:
     storage = storage_dir or Path(os.environ.get("CERTIFICATE_STORAGE_DIR", "data/certificates"))
     origin = (public_url or os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL")
               or "http://127.0.0.1:8000").rstrip("/")
     parsed = urlsplit(origin)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
         raise ValueError("PUBLIC_BASE_URL debe ser una URL http(s) sin ruta, credenciales, consulta ni fragmento.")
-    key = access_key if access_key is not None else os.environ.get("PORTAL_ACCESS_KEY", "")
     is_local = local_url(origin)
     if not is_local and parsed.scheme != "https":
         raise ValueError("PUBLIC_BASE_URL debe usar HTTPS para publicar el portal.")
-    uploads_enabled = is_local or len(key) >= 16
     quota = int(os.environ.get("MAX_STORAGE_MB", "1024")) * 1024 * 1024
 
     @asynccontextmanager
     async def lifespan(app):
         storage.mkdir(parents=True, exist_ok=True)
-        if not uploads_enabled:
-            logger.warning(
-                "La página pública está disponible, pero la preparación de certificados está deshabilitada. "
-                "Configura PORTAL_ACCESS_KEY con al menos 16 caracteres y vuelve a desplegar."
-            )
         app.state.executor = ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context("spawn"))
         app.state.processing = asyncio.Semaphore(2)
         app.state.storage_lock = asyncio.Lock()
@@ -134,7 +114,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
 
     app = FastAPI(title="Portal de certificados QCP", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
-    app.add_middleware(RequestGuard, access_key=key, uploads_enabled=uploads_enabled)
+    app.add_middleware(RequestGuard)
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -155,7 +135,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
 
     @app.get("/api/config")
     async def configuration():
-        return {"requiresAccessKey": bool(key) or not is_local, "uploadsEnabled": uploads_enabled, "localMode": is_local,
+        return {"requiresAccessKey": False, "uploadsEnabled": True, "localMode": is_local,
                 "maxPdfMB": 15, "maxSignatureMB": 2, "maxPages": 100}
 
     @app.get("/")

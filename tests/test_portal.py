@@ -26,7 +26,7 @@ def pdf_bytes(codes=("QCP-2026-0001",), *, full_page=False):
 
 @pytest.fixture
 def client(tmp_path):
-    with TestClient(create_app(tmp_path / "certificates", "http://127.0.0.1:8000", "")) as client:
+    with TestClient(create_app(tmp_path / "certificates", "http://127.0.0.1:8000")) as client:
         yield client
 
 
@@ -169,21 +169,21 @@ def test_signature_field_is_not_silently_invalidated():
 
 def test_public_deployment_requires_https(tmp_path):
     with pytest.raises(ValueError, match="HTTPS"):
-        create_app(tmp_path, "http://example.com", "long-enough-access-key")
+        create_app(tmp_path, "http://example.com")
 
 
-@pytest.mark.parametrize("key", ["", "short"])
-def test_public_page_starts_without_valid_key_and_blocks_all_uploads(tmp_path, key):
-    with TestClient(create_app(tmp_path, "https://example.com", key)) as client:
+@pytest.mark.parametrize("key", ["", "short", "test-key-at-least-16-chars"])
+def test_public_uploads_ignore_legacy_access_key(tmp_path, monkeypatch, key):
+    monkeypatch.setenv("PORTAL_ACCESS_KEY", key)
+    with TestClient(create_app(tmp_path, "https://example.com")) as client:
         assert client.get("/").status_code == 200
         assert client.get("/healthz").json() == {"status": "ok"}
-        assert client.get("/api/config").json()["uploadsEnabled"] is False
-        assert client.get("/api/config").json()["requiresAccessKey"] is True
-        assert upload(client).status_code == 503
-        response = client.post("/api/certificates", headers={"X-Portal-Key": key},
-                               files={"pdf": ("test.pdf", pdf_bytes(), "application/pdf")})
-        assert response.status_code == 503
-        assert not list(tmp_path.iterdir())
+        assert client.get("/api/config").json()["uploadsEnabled"] is True
+        assert client.get("/api/config").json()["requiresAccessKey"] is False
+        response = upload(client, codigoCorrecto="QCP-2026-0099")
+        assert response.status_code == 201
+        assert response.json()["finalCode"] == "QCP-2026-0099"
+        assert client.get(response.json()["downloadUrl"]).status_code == 200
 
 
 def test_render_url_without_access_key_serves_public_page(tmp_path, monkeypatch):
@@ -193,33 +193,29 @@ def test_render_url_without_access_key_serves_public_page(tmp_path, monkeypatch)
     with TestClient(create_app(storage_dir=tmp_path)) as client:
         assert client.get("/").status_code == 200
         assert client.get("/api/config").json()["localMode"] is False
-        assert client.get("/api/config").json()["uploadsEnabled"] is False
-        assert upload(client).status_code == 503
+        assert client.get("/api/config").json()["uploadsEnabled"] is True
+        assert upload(client).status_code == 201
 
 
-def test_existing_certificates_remain_public_when_uploads_are_disabled(tmp_path):
-    key = "test-key-at-least-16-chars"
-    with TestClient(create_app(tmp_path, "https://example.com", key)) as configured:
-        response = configured.post("/api/certificates", headers={"X-Portal-Key": key},
-                                   files={"pdf": ("test.pdf", pdf_bytes(), "application/pdf")})
+def test_existing_certificates_remain_public_after_restart(tmp_path):
+    with TestClient(create_app(tmp_path, "https://example.com")) as configured:
+        response = upload(configured)
         assert response.status_code == 201
         info = response.json()
-    with TestClient(create_app(tmp_path, "https://example.com", "")) as unconfigured:
+    with TestClient(create_app(tmp_path, "https://example.com")) as unconfigured:
         assert unconfigured.get(f"/certificados/{info['id']}").status_code == 200
         assert unconfigured.get(f"/api/certificates/{info['id']}").json() == info
         assert hashlib.sha256(unconfigured.get(info["downloadUrl"]).content).hexdigest() == info["sha256"]
 
 
-def test_auth_guards_upload_but_allows_public_certificate_lookup(tmp_path):
-    key = "test-key-at-least-16-chars"
-    with TestClient(create_app(tmp_path, "https://certificates.example.com", key)) as client:
-        assert upload(client).status_code == 401
-        response = client.post("/api/certificates", headers={"X-Portal-Key": key},
+def test_public_uploads_do_not_require_an_auth_header(tmp_path):
+    with TestClient(create_app(tmp_path, "https://certificates.example.com")) as client:
+        response = client.post("/api/certificates", headers={"X-Portal-Key": "irrelevant-old-header"},
                                files={"pdf": ("test.pdf", pdf_bytes(), "application/pdf")})
         assert response.status_code == 201
         assert response.json()["verificationUrl"].startswith("https://certificates.example.com/")
         assert client.get(response.json()["downloadUrl"]).status_code == 200
-        assert client.get("/api/config").json()["requiresAccessKey"] is True
+        assert client.get("/api/config").json()["requiresAccessKey"] is False
         assert client.get("/api/config").json()["uploadsEnabled"] is True
 
 
@@ -240,11 +236,11 @@ def test_pdf_file_limit_is_enforced(client):
 
 
 def test_registered_certificate_survives_application_restart(tmp_path):
-    with TestClient(create_app(tmp_path, "http://127.0.0.1:8000", "")) as first:
+    with TestClient(create_app(tmp_path, "http://127.0.0.1:8000")) as first:
         response = upload(first)
         assert response.status_code == 201
         info = response.json()
-    with TestClient(create_app(tmp_path, "http://127.0.0.1:8000", "")) as restarted:
+    with TestClient(create_app(tmp_path, "http://127.0.0.1:8000")) as restarted:
         download = restarted.get(info["downloadUrl"])
         assert download.status_code == 200
         assert hashlib.sha256(download.content).hexdigest() == info["sha256"]
@@ -252,7 +248,7 @@ def test_registered_certificate_survives_application_restart(tmp_path):
 
 def test_storage_quota_does_not_silently_remove_files(tmp_path, monkeypatch):
     monkeypatch.setenv("MAX_STORAGE_MB", "0")
-    with TestClient(create_app(tmp_path, "http://127.0.0.1:8000", "")) as client:
+    with TestClient(create_app(tmp_path, "http://127.0.0.1:8000")) as client:
         response = upload(client)
         assert response.status_code == 507
         assert not list(tmp_path.iterdir())

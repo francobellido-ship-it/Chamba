@@ -52,7 +52,7 @@ Con el servidor arrancado, comprueba además una carga y descarga reales:
 .venv/bin/python scripts/smoke.py
 ```
 
-Esta comprobación guarda un certificado ficticio marcado SIN VALIDEZ. Usa `--url https://tu-portal.example.com` para comprobar una publicación; lee la clave de acceso de `PORTAL_ACCESS_KEY` sin imprimirla.
+Esta comprobación guarda un certificado ficticio marcado SIN VALIDEZ. Usa `--url https://tu-portal.example.com` para comprobar una publicación. La carga y el procesamiento son públicos y no requieren contraseña.
 
 ## Publicar para obtener un enlace
 
@@ -61,7 +61,7 @@ El repositorio y la publicación web son cosas distintas: subir este código a G
 Puedes desplegar el `Dockerfile` en un proveedor que admita contenedores y almacenamiento persistente, por ejemplo un servicio web Docker en Render:
 
 1. Conecta este repositorio y selecciona la rama `main` y el runtime Docker.
-2. Configura `PORTAL_ACCESS_KEY` como secreto de al menos 16 caracteres para habilitar el procesamiento. La página pública arranca incluso si falta esta clave o es demasiado corta; en ese caso muestra un aviso y bloquea las cargas. La clave se introduce en el portal para preparar documentos; no se exige a quien consulta un certificado mediante su QR.
+2. El portal permite cargar y procesar PDFs sin contraseña, por decisión del usuario. Si configuraste `PORTAL_ACCESS_KEY` en una versión anterior, puedes eliminarla: la aplicación ya no la utiliza. Se mantienen los límites de archivos, páginas, procesamiento simultáneo y almacenamiento.
 3. Configura `PUBLIC_BASE_URL` con la dirección **HTTPS** del servicio, sin barra final ni ruta. En Render también se acepta su variable automática `RENDER_EXTERNAL_URL` si no defines `PUBLIC_BASE_URL`.
 4. Monta un **disco persistente** en `/data`, escribible por el usuario del contenedor (UID 10001). El proveedor puede cobrar por el servicio o el disco; revisa su precio antes de crear recursos.
 5. Usa `/healthz` como comprobación de salud. Abre la página y procesa un PDF ficticio; descarga el resultado, escanea su QR desde otro dispositivo y comprueba que abre la página de consulta.
@@ -75,14 +75,13 @@ docker build -t chamba-qcp .
 docker run --rm -p 8000:8000 --mount type=volume,source=qcp-data,target=/data chamba-qcp
 ```
 
-Ese ejemplo es para pruebas locales. Para publicación usa HTTPS, la URL pública, la clave de acceso y un proxy frontal. `PUBLIC_BASE_URL` determina los QR; no se confía en encabezados de origen enviados por clientes.
+Ese ejemplo es para pruebas locales. Para publicación usa HTTPS, la URL pública y un proxy frontal. `PUBLIC_BASE_URL` determina los QR; no se confía en encabezados de origen enviados por clientes.
 
 ### Variables
 
 | Nombre | Uso |
 | --- | --- |
 | `PUBLIC_BASE_URL` | Origen HTTPS del portal publicado. Por defecto, origen local de pruebas. |
-| `PORTAL_ACCESS_KEY` | Secreto para subir/procesar documentos en un origen público, mínimo de 16 caracteres. Sin clave válida, la página se puede visualizar y consultar; las cargas quedan bloqueadas. |
 | `CERTIFICATE_STORAGE_DIR` | Directorio de certificados. Por defecto `data/certificates`; en Docker `/data/certificates`. |
 | `MAX_STORAGE_MB` | Cuota total del directorio. Por defecto 1024 MB; no elimina archivos automáticamente. |
 | `PORT` | Puerto de escucha. Por defecto 8000. |

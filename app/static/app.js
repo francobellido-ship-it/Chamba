@@ -3,7 +3,6 @@ const $ = (id) => document.getElementById(id);
 let files = [];
 let busy = false;
 let ready = false;
-let requiresKey = false;
 const codes = new Map();
 
 function message(text) {
@@ -120,14 +119,11 @@ $("certificate-form").addEventListener("submit", async (event) => {
   if (signature && (signature.size > 2 * 1024 * 1024 || !/\.(png|jpe?g)$/i.test(signature.name))) {
     return message("La firma debe ser PNG o JPG de hasta 2 MB.");
   }
-  const key = $("access-key").value;
-  if (requiresKey && !key) return message("Ingresa la clave de acceso para preparar certificados.");
   message("");
   busy = true;
   renderFiles();
   $("pdf-files").disabled = true;
   $("signature").disabled = true;
-  $("access-key").disabled = true;
   $("submit").textContent = "Preparando…";
   $("result-list").replaceChildren();
   $("results").hidden = false;
@@ -142,7 +138,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
       form.append("codigoCorrecto", (codes.get(file) || "").trim());
       if (signature) form.append("firma", signature);
       try {
-        const response = await fetch("/api/certificates", { method: "POST", headers: key ? { "X-Portal-Key": key } : {}, body: form });
+        const response = await fetch("/api/certificates", { method: "POST", body: form });
         const result = await response.json();
         if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "La carga no es válida.");
         addResult(file, result, null);
@@ -158,7 +154,6 @@ $("certificate-form").addEventListener("submit", async (event) => {
     busy = false;
     $("pdf-files").disabled = false;
     $("signature").disabled = false;
-    $("access-key").disabled = false;
     $("submit").textContent = failed.length ? "Reintentar archivos pendientes →" : "Preparar certificados →";
     $("progress").textContent = `${completed} de ${batch.length} certificados preparados.${failed.length ? " Los archivos pendientes siguen seleccionados." : " Ya puedes descargarlos."}`;
     renderFiles();
@@ -170,8 +165,6 @@ async function initialize() {
     const response = await fetch("/api/config");
     if (!response.ok) throw new Error("El portal no está disponible.");
     const config = await response.json();
-    requiresKey = config.requiresAccessKey;
-    $("key-field").hidden = !requiresKey || !config.uploadsEnabled;
     $("local-notice").hidden = !config.localMode;
     ready = config.uploadsEnabled === true;
     $("setup-notice").hidden = ready;
