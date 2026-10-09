@@ -85,7 +85,9 @@ def workbook_bytes(code="QCP-2026-0001"):
 def qr_images(doc):
     decoded = []
     for info in doc[0].get_image_info(xrefs=True):
-        image = Image.open(BytesIO(doc.extract_image(info["xref"])["image"]))
+        # Render transparency against the page, as a scanner sees the PDF.
+        pixmap = doc[0].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(info["bbox"]))
+        image = Image.open(BytesIO(pixmap.tobytes("png")))
         barcode = zxingcpp.read_barcode(image)
         if barcode:
             decoded.append((barcode.text, pymupdf.Rect(info["bbox"])))

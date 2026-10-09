@@ -70,11 +70,11 @@ def test_upload_replace_and_download_end_to_end(client):
             assert "QCP-2026-0001" not in text
             assert "Resultado: conforme" in text
             assert any(link.get("uri") == info["verificationUrl"] for link in page.get_links())
-        # Decode the actual embedded QR image rather than merely checking it exists.
+        # Decode the rendered QR, including its transparent margin against the page.
         decoded = []
-        for image in doc[0].get_images(full=True):
-            raw = doc.extract_image(image[0])["image"]
-            barcode = zxingcpp.read_barcode(Image.open(BytesIO(raw)))
+        for image in doc[0].get_image_info():
+            pixmap = doc[0].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(image["bbox"]))
+            barcode = zxingcpp.read_barcode(Image.open(BytesIO(pixmap.tobytes("png"))))
             if barcode:
                 decoded.append(barcode.text)
         assert info["verificationUrl"] in decoded

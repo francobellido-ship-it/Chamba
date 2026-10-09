@@ -165,7 +165,14 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=4, box_size=8)
         qr.add_data(verification_url)
         qr.make(fit=True)
-        qr.make_image(fill_color="black", back_color="white").save(qr_buffer, format="PNG")
+        qr_image = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+        # Keep the four-module clear margin, letting the page show through it.
+        # White cells inside the QR stay opaque to preserve contrast for scanning.
+        padding = qr.border * qr.box_size
+        alpha = Image.new("L", qr_image.size, 0)
+        alpha.paste(255, (padding, padding, qr_image.width - padding, qr_image.height - padding))
+        qr_image.putalpha(alpha)
+        qr_image.save(qr_buffer, format="PNG")
         original_pages = doc.page_count
         stamped_pages = []
         appended = False
