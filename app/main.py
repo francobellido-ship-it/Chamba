@@ -151,6 +151,14 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
     async def home():
         return FileResponse(STATIC / "index.html")
 
+    @app.get("/privacidad")
+    async def privacy():
+        return FileResponse(STATIC / "privacy.html")
+
+    @app.get("/condiciones")
+    async def terms():
+        return FileResponse(STATIC / "terms.html")
+
     @app.get("/certificados/{certificate_id}")
     async def certificate_page(certificate_id: UUID):
         await asyncio.to_thread(store.metadata, str(certificate_id))

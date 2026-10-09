@@ -155,6 +155,8 @@ input::file-selector-button { cursor: pointer; border: 0; border-radius: 4px; pa
 .site-footer { max-width: 1184px; border-top: 1px solid var(--line); padding: 22px 0 26px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 24px; color: var(--muted); font-size: 10px; }
 .site-footer > div { display: flex; gap: 13px; }
 .site-footer strong { color: var(--ink); font-weight: 600; }
+.site-footer nav { display: flex; flex-wrap: wrap; gap: 14px; }
+.site-footer nav a { color: var(--muted); text-decoration: underline; }
 
 .verify-layout { max-width: 740px; padding: 0 25px; margin: 55px auto; }
 .verify-panel { padding: 36px; }
@@ -210,7 +212,7 @@ input::file-selector-button { cursor: pointer; border: 0; border-radius: 4px; pa
   .steps li { padding-top: 17px; }
   .steps p { max-width: 420px; }
   .disclaimer { line-height: 1.8; }
-  .site-footer { margin: 0 20px; padding: 20px 0; }
+  .site-footer { margin: 0 20px; padding: 20px 0; flex-wrap: wrap; }
   .site-footer > div { flex-direction: column; gap: 3px; }
   .site-footer > span { font-size: 9px; text-align: right; }
   .verify-layout { margin: 30px auto; padding: 0 20px; }

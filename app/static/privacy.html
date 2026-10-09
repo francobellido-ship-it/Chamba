@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cómo Portal QCP utiliza los archivos, la autorización de Google Drive y los enlaces de los certificados.">
+  <title>Política de privacidad · Portal QCP</title>
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/legal.css">
+</head>
+<body>
+  <header class="site-header"><div class="header-inner"><a class="brand" href="/" aria-label="Quality Control Perú S.A.C. · Inicio"><span class="brand-symbol" aria-hidden="true"></span><span class="brand-name">Quality Control <span>Perú S.A.C.</span><span class="brand-sub">Portal de certificados</span></span></a><nav class="header-nav" aria-label="Navegación principal"><a href="/">Volver al portal</a></nav></div></header>
+  <main class="legal-layout">
+    <article class="panel legal-content">
+      <span class="eyebrow">PORTAL QCP</span>
+      <h1>Política de privacidad</h1>
+      <p class="legal-date">Actualizada el 9 de octubre de 2026.</p>
+      <p>Portal QCP convierte archivos Excel o PDF en certificados PDF con una imagen de firma y un QR de consulta. Esta política describe el uso de los documentos cargados y de la autorización de Google Drive.</p>
+
+      <h2>Datos utilizados y finalidad</h2>
+      <p>El portal recibe el archivo Excel o PDF, su nombre, el código de certificado indicado y una imagen de firma opcional. Los documentos pueden contener nombres, información de clientes y resultados de mediciones. Se utilizan para preparar el PDF solicitado, incorporar el QR, conservar la copia final y permitir su consulta y descarga.</p>
+      <p>Se registra el nombre del PDF, su identificador, fecha de emisión en el portal, códigos detectados, cambios realizados, presencia de firma y una huella SHA-256 que permite comprobar si la copia almacenada coincide con el registro. El portal no solicita contraseñas de Google a los trabajadores.</p>
+
+      <h2>Acceso a Google Drive</h2>
+      <p>La persona que administra el almacenamiento autoriza su cuenta mediante el consentimiento de Google. El permiso de Drive solicitado es amplio; la aplicación utiliza una carpeta configurada para crear los PDFs finales y sus registros, consultar esos registros y descargar los certificados.</p>
+      <p>Las credenciales de autorización se configuran en el servidor. No se incorporan en los PDFs, QR ni registros de certificados. El acceso a los datos de Google se utiliza para las funciones descritas en esta política, sin venta de esos datos, publicidad ni entrenamiento de modelos. La aplicación no utiliza Gmail, Google Fotos ni una agenda de contactos.</p>
+      <p>El uso de información recibida mediante las APIs de Google debe respetar la <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener noreferrer">Política de Datos de Usuario de los Servicios de API de Google</a>, incluidos sus requisitos de uso limitado.</p>
+
+      <h2>Procesamiento y almacenamiento</h2>
+      <p>El servicio se ejecuta en Render. Los archivos fuente y la firma se procesan para generar el resultado; no se guardan como archivos independientes en Drive. Cuando Drive está conectado, se conserva el PDF final y un registro por emisión en la carpeta seleccionada por el administrador.</p>
+      <p>En la fase de pruebas, el administrador puede utilizar una cuenta personal con documentos ficticios. Para emitir documentos reales debe configurar el almacenamiento administrado por la empresa. Cambiar de cuenta o carpeta afecta a las nuevas emisiones y no traslada automáticamente las anteriores.</p>
+
+      <h2>Quién puede consultar los certificados</h2>
+      <p>Cada PDF final se comparte como «cualquiera con el enlace». Una persona que reciba el QR o el enlace puede leer y descargar ese PDF sin iniciar sesión. La aplicación no publica la carpeta completa ni el archivo de registro mediante ese permiso.</p>
+      <p>Las personas con permisos sobre la carpeta de Drive pueden acceder a sus archivos según esos permisos. La página de consulta del portal muestra los datos del registro a quien tenga su enlace: nombre de archivo, código, fecha, presencia de firma y huella del PDF. Por eso, solo deben cargarse documentos autorizados para esta forma de consulta.</p>
+
+      <h2>Conservación y retirada</h2>
+      <p>El portal no programa el vencimiento de los QR ni elimina automáticamente los certificados por antigüedad. Los archivos permanecen hasta que el responsable del almacenamiento los retire o el proveedor deje de mantenerlos disponibles. El almacenamiento local de Render Free es temporal y puede perderse al reiniciar o desplegar; para conservar las emisiones debe completarse la conexión con Drive.</p>
+      <p>Para solicitar una corrección, retirada o restricción de acceso, contacta con la persona o empresa que emitió el certificado. El responsable de Drive puede eliminar el PDF y su registro o cambiar su permiso de lectura. Esto puede dejar el QR sin acceso; no elimina las copias que otras personas ya hayan descargado.</p>
+
+      <h2>Revocar la autorización y contacto</h2>
+      <p>La persona que autorizó su cuenta puede retirar el acceso del portal desde las <a href="https://myaccount.google.com/connections" rel="noopener noreferrer">conexiones de su cuenta de Google</a>. La revocación impide nuevas operaciones del servidor con esa cuenta, pero no elimina los PDFs ni cambia los permisos públicos ya concedidos.</p>
+      <p>Para consultas sobre la autorización de Google, utiliza el correo de asistencia que se muestra en la pantalla de consentimiento de Portal QCP. Para consultas sobre el contenido o tratamiento de un certificado, contacta con su emisor o con el administrador del portal de tu equipo.</p>
+      <nav class="legal-nav" aria-label="Información del servicio"><a href="/">Volver al portal</a><a href="/condiciones">Condiciones de uso</a></nav>
+    </article>
+  </main>
+</body>
+</html>
