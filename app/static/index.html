@@ -64,11 +64,11 @@
             <small>Formato .xlsx · También puedes cargar PDF</small>
           </label>
           <div class="upload-limits"><span>Hasta 20 archivos por lote</span><span>15 MB por archivo · 100 páginas</span></div>
-          <div id="selection-summary" class="selection-summary" hidden><span id="file-count" role="status"></span><span>Elige el tipo y revisa los códigos</span></div>
+          <div id="selection-summary" class="selection-summary" hidden><span id="file-count" role="status"></span><span>Revisa el formato y los códigos</span></div>
           <div id="file-list" class="file-list" aria-live="polite"></div>
           <details class="signature-options">
             <summary><span class="option-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="m14 5 5 5M4 20l4-1 12-12a2.1 2.1 0 0 0-3-3L5 16zM12 20h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span>Firma del certificado <span class="optional">Opcional</span></span><svg class="option-chevron" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
-            <div class="signature-body"><p>Conservamos la firma que ya está en tu Excel. Si necesitas reemplazarla, carga una imagen autorizada para todo el lote.</p><div class="field"><label for="signature">Reemplazar la firma</label><input id="signature" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg"><small>PNG o JPG · Máximo 2 MB</small></div></div>
+            <div class="signature-body"><p>Conservamos la firma que ya está en tu Excel. Para añadirla o reemplazarla, carga una imagen autorizada para todo el lote.</p><div class="field"><label for="signature">Añadir o reemplazar la firma</label><input id="signature" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg"><small>PNG o JPG · Máximo 2 MB</small></div></div>
           </details>
           <p class="signature-hint">Si tu Excel ya tiene firma, puedes continuar directamente.</p>
           <button id="submit" class="primary-button" type="submit" disabled>Preparar certificados <span aria-hidden="true">→</span></button>
@@ -81,8 +81,8 @@
     <section id="guia" class="guide" aria-labelledby="guide-title">
       <div class="guide-heading"><h2 id="guide-title">Tu flujo de trabajo, más simple.</h2><span>Tres pasos para preparar tu lote</span></div>
       <ol class="steps">
-        <li><span class="step-number">01</span><div><h3>Selecciona tus archivos</h3><p>Usa tu plantilla QCP con la hoja <strong>Certificado</strong>. Puedes cargar varios Excel a la vez.</p></div></li>
-        <li><span class="step-number">02</span><div><h3>Elige el tipo de certificado</h3><p>Selecciona acreditado o no acreditado para aplicar su fondo oficial. Revisa el código y conserva o reemplaza la firma.</p></div></li>
+        <li><span class="step-number">01</span><div><h3>Selecciona tus archivos</h3><p>Usa tu plantilla con la hoja <strong>Certificado</strong> o <strong>CERTIFICADO QCP</strong>. Puedes cargar varios Excel a la vez.</p></div></li>
+        <li><span class="step-number">02</span><div><h3>Conserva tu formato</h3><p>Mantenemos el fondo, encabezado y pie del Excel. Si no trae ninguno, elige acreditado o no acreditado. Revisa el código y la firma.</p></div></li>
         <li><span class="step-number">03</span><div><h3>Descarga y comparte</h3><p>Obtén un PDF por archivo. Su QR abre la consulta y la descarga de ese certificado.</p></div></li>
       </ol>
       <p class="disclaimer">La firma se incorpora como imagen; no es una firma digital. Cualquier persona con el enlace o el QR puede consultar y descargar el certificado.</p>

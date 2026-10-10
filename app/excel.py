@@ -16,6 +16,7 @@ import pymupdf
 
 from app.pdf import CertificateError, MAX_PAGES
 from app.backgrounds import Letterhead, apply_letterhead
+from app.excel_headers import header_pictures, restore_header_pictures
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -32,6 +33,97 @@ class ConvertedExcel:
     pdf: bytes
     embedded_signature: bool
     warnings: list[str]
+    background_digests: tuple[bytes, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExcelLayout:
+    sheet_name: str
+    sheet_path: str
+    sheet_index: int
+    preserve_format: bool
+
+
+def _read_parts(data: bytes) -> dict[str, bytes]:
+    try:
+        source = zipfile.ZipFile(BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise CertificateError("El archivo debe ser un Excel .xlsx válido y sin contraseña.") from exc
+    with source:
+        entries = source.infolist()
+        if len(entries) > 2000 or sum(e.file_size for e in entries) > 80 * 1024 * 1024:
+            raise CertificateError("El contenido del Excel supera el tamaño permitido.")
+        if len({e.filename for e in entries}) != len(entries):
+            raise CertificateError("El Excel contiene partes duplicadas.")
+        if any(e.filename.startswith("/") or ".." in PurePosixPath(e.filename).parts for e in entries):
+            raise CertificateError("El Excel contiene rutas internas inválidas.")
+        if any(e.flag_bits & 1 or "vbaproject" in e.filename.lower() for e in entries):
+            raise CertificateError("Solo se admiten archivos .xlsx sin macros ni contraseña.")
+        parts = {entry.filename: source.read(entry) for entry in entries}
+    if "xl/workbook.xml" not in parts:
+        raise CertificateError("El archivo no contiene un libro Excel válido.")
+    return parts
+
+
+def _layout(parts: dict[str, bytes]) -> ExcelLayout:
+    workbook = xml(parts["xl/workbook.xml"])
+    rels = xml(parts["xl/_rels/workbook.xml.rels"])
+    targets = {rel.get("Id"): related("xl/workbook.xml", rel.get("Target", ""))
+               for rel in rels if rel.get("TargetMode") != "External"}
+    strings = (["".join(item.itertext()) for item in xml(parts["xl/sharedStrings.xml"])]
+               if "xl/sharedStrings.xml" in parts else [])
+    candidates = []
+    for index, entry in enumerate(workbook.findall("s:sheets/s:sheet", NS)):
+        name = entry.get("name", "")
+        if not re.fullmatch(r"certificado(?:\s+qcp)?", name.strip(), re.I):
+            continue
+        path = targets.get(entry.get(f"{{{R}}}id"))
+        if not path or path not in parts:
+            raise CertificateError("No se pudo localizar la hoja del certificado.")
+        sheet = xml(parts[path])
+        text = " ".join(cell_value(cell, strings) for cell in sheet.findall("s:sheetData/s:row/s:c", NS))
+        marker = bool(re.search(r"escane\w*\s+(?:este\s+)?qr|c[oó]digo\s+qr", text, re.I))
+        candidates.append((marker, index, name, path, sheet))
+    if not candidates:
+        raise CertificateError("El Excel debe tener una hoja llamada Certificado o CERTIFICADO QCP.")
+    marked = [candidate for candidate in candidates if candidate[0]]
+    if len(marked) > 1 or (not marked and len(candidates) > 1):
+        raise CertificateError("Hay varias hojas de certificado. Deja una sola hoja de certificado para identificar el formato correcto.")
+    _, index, name, path, sheet = marked[0] if marked else candidates[0]
+    picture = sheet.find("s:picture", NS)
+    if picture is not None:
+        rel_path = relationship_file(path)
+        rels = xml(parts.get(rel_path, b"<Relationships/>"))
+        target = next((rel.get("Target") for rel in rels if rel.get("Id") == picture.get(f"{{{R}}}id")), None)
+        if not target or related(path, target) not in parts:
+            raise CertificateError("Falta la imagen del fondo dentro del Excel. Guarda una copia con el fondo incorporado.")
+    header = sheet.find("s:headerFooter", NS)
+    existing = picture is not None or (header is not None and any((e.text or "").strip() for e in header))
+    existing |= sheet.find("s:legacyDrawingHF", NS) is not None
+    # Logos/letterheads drawn in worksheet cells must also remain intact.
+    drawing = sheet.find("s:drawing", NS)
+    if drawing is not None:
+        rel_path = relationship_file(path)
+        if rel_path in parts:
+            drawing_rels = xml(parts[rel_path])
+            target = next((rel.get("Target") for rel in drawing_rels
+                           if rel.get("Id") == drawing.get(f"{{{R}}}id")), None)
+            if target:
+                root = xml(parts[related(path, target)])
+                for anchor in root:
+                    row = anchor.find("d:from/d:row", NS)
+                    if anchor.find(".//a:blip", NS) is not None and row is not None and int(row.text) < 5:
+                        existing = True
+    return ExcelLayout(name, path, index, bool(existing))
+
+
+def inspect_excel(data: bytes) -> ExcelLayout:
+    try:
+        return _layout(_read_parts(data))
+    except CertificateError:
+        raise
+    except (KeyError, IndexError, ValueError, OSError, AttributeError, TypeError, zipfile.BadZipFile) as exc:
+        raise CertificateError("No se pudo leer la estructura de este Excel.") from exc
 
 
 def xml(data: bytes) -> ET.Element:
@@ -103,23 +195,10 @@ def _number_formats(data: bytes) -> bytes:
 
 def _prepare_workbook(data: bytes, replace_signature: bool,
                       letterhead: Letterhead | None = None) -> tuple[bytes, bytes | None, str, bool, list[str]]:
-    try:
-        source = zipfile.ZipFile(BytesIO(data))
-    except zipfile.BadZipFile as exc:
-        raise CertificateError("El archivo debe ser un Excel .xlsx válido y sin contraseña.") from exc
-    with source:
-        entries = source.infolist()
-        if len(entries) > 2000 or sum(e.file_size for e in entries) > 80 * 1024 * 1024:
-            raise CertificateError("El contenido del Excel supera el tamaño permitido.")
-        if len({e.filename for e in entries}) != len(entries):
-            raise CertificateError("El Excel contiene partes duplicadas.")
-        if any(e.filename.startswith("/") or ".." in PurePosixPath(e.filename).parts for e in entries):
-            raise CertificateError("El Excel contiene rutas internas inválidas.")
-        if any(e.flag_bits & 1 or "vbaproject" in e.filename.lower() for e in entries):
-            raise CertificateError("Solo se admiten archivos .xlsx sin macros ni contraseña.")
-        parts = {entry.filename: source.read(entry) for entry in entries}
-    if "xl/workbook.xml" not in parts:
-        raise CertificateError("El archivo no contiene un libro Excel válido.")
+    parts = _read_parts(data)
+    layout = _layout(parts)
+    if layout.preserve_format:
+        letterhead = None
     # Export saved results offline. Data connections are not needed for printing.
     discarded = {name for name in parts if name.startswith(("xl/externalLinks/", "xl/queryTables/"))
                  or name == "xl/connections.xml"}
@@ -145,15 +224,9 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
     if external is not None:
         workbook.remove(external)
     sheets = workbook.find("s:sheets", NS)
-    selected = next((sheet for sheet in sheets if sheet.get("name", "").casefold() == "certificado"), None)
-    if selected is None:
-        raise CertificateError("El Excel debe tener una hoja llamada Certificado.")
-    selected_index = list(sheets).index(selected)
-    rels = xml(parts["xl/_rels/workbook.xml.rels"])
-    target = next((rel.get("Target") for rel in rels if rel.get("Id") == selected.get(f"{{{R}}}id")), None)
-    if not target:
-        raise CertificateError("No se pudo localizar la hoja Certificado.")
-    sheet_path = related("xl/workbook.xml", target)
+    selected = list(sheets)[layout.sheet_index]
+    selected_index = layout.sheet_index
+    sheet_path = layout.sheet_path
     sheet = xml(parts[sheet_path])
     strings = []
     if "xl/sharedStrings.xml" in parts:
@@ -164,8 +237,6 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         sheet.remove(queries)
     guide = next((cell for cell in cells if "escanee este qr" in cell_value(cell, strings).casefold()), None)
     author = next((cell for cell in cells if "autorizado y firma" in cell_value(cell, strings).casefold()), None)
-    if guide is None:
-        raise CertificateError("La hoja Certificado debe contener el texto Escanee este QR para colocar el QR a su lado.")
     for cell in cells:
         formula = cell.find("s:f", NS)
         if formula is not None:
@@ -188,7 +259,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         view.set("firstSheet", "0")
     names = workbook.find("s:definedNames", NS)
     if names is None:
-        raise CertificateError("La hoja Certificado necesita un área de impresión configurada.")
+        names = ET.SubElement(workbook, f"{{{S}}}definedNames")
     area_exists = False
     for name in list(names):
         if name.get("localSheetId") == str(selected_index) and name.get("name") in {"_xlnm.Print_Area", "_xlnm.Print_Titles"}:
@@ -197,7 +268,23 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         else:
             names.remove(name)
     if not area_exists:
-        raise CertificateError("Configura el área de impresión de la hoja Certificado antes de subirla.")
+        # Some saved templates (including CERTIFICADO QCP) have no Print_Area.
+        # Include meaningful cells and merged ranges, not stray formatted columns.
+        refs = [cell.get("r") for cell in cells if cell_value(cell, strings).strip()]
+        refs += [merge.get("ref", "").split(":")[-1] for merge in sheet.findall("s:mergeCells/s:mergeCell", NS)]
+        coords = [re.fullmatch(r"([A-Z]+)([0-9]+)", ref or "") for ref in refs]
+        coords = [match for match in coords if match]
+        if not coords:
+            raise CertificateError("La hoja del certificado no contiene datos para imprimir.")
+        def column_number(value):
+            result = 0
+            for character in value:
+                result = result * 26 + ord(character) - 64
+            return result
+        last_col = max((match[1] for match in coords), key=column_number)
+        last_row = max(int(match[2]) for match in coords)
+        name = selected.get("name").replace("'", "''")
+        ET.SubElement(names, f"{{{S}}}definedName", name="_xlnm.Print_Area", localSheetId="0").text = f"'{name}'!$A$1:${last_col}${last_row}"
     # The QCP zero-margin background is rendered as a single page image, not tiled.
     background = letterhead.data if letterhead else None
     footer = ""
@@ -215,28 +302,38 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
             sheet_rels.remove(picture_rel)
             parts[sheet_rels_path] = ET.tostring(sheet_rels, encoding="utf-8", xml_declaration=True)
         sheet.remove(picture)
-    if letterhead and (sheet.find("s:legacyDrawingHF", NS) is not None or any(
-            "&G" in (element.text or "") for element in sheet.findall("s:headerFooter/*", NS))):
-        raise CertificateError("El Excel contiene imágenes en el encabezado o pie. Retira esas imágenes; el portal aplicará el fondo oficial elegido.")
     footer_element = sheet.find("s:headerFooter/s:oddFooter", NS)
-    if footer_element is not None:
+    # The original zero-margin QCP background needs the existing footer offset.
+    # Other headers/footers keep their native styles, alignment and page variants.
+    margins = sheet.find("s:pageMargins", NS)
+    zero_margin_background = background and margins is not None and all(
+        float(margins.get(k, "0")) == 0 for k in ("left", "right", "top", "bottom"))
+    if footer_element is not None and zero_margin_background and "&G" not in (footer_element.text or ""):
         footer = footer_element.text or ""
         footer_element.text = ""
     options = sheet.find("s:printOptions", NS)
-    if options is not None:
+    if options is not None and zero_margin_background:
         options.set("horizontalCentered", "0")
         options.set("verticalCentered", "0")
-    margins = sheet.find("s:pageMargins", NS)
-    if letterhead and margins is None:
+    missing_margins = margins is None
+    if letterhead and missing_margins:
         margins = ET.SubElement(sheet, f"{{{S}}}pageMargins")
-    if letterhead or (background and margins is not None and all(float(margins.get(k, "0")) == 0 for k in ("left", "right", "top", "bottom"))):
+    if (letterhead and missing_margins) or zero_margin_background:
         # Leave room for the full-page QCP letterhead and footer from the example.
         margins.attrib.update(left="0.5", right="0.5", top="0.4", bottom="0.18", header="0", footer="0.18")
+    if letterhead:
+        # A new letterhead needs room for its printed logo and contact footer.
+        # Existing stationery takes the other path and keeps its saved margins.
+        margins.set("top", str(max(float(margins.get("top", "0")), 1.4)))
+        margins.set("bottom", str(max(float(margins.get("bottom", "0")), .65)))
     setup = sheet.find("s:pageSetup", NS)
     if letterhead and setup is not None and (setup.get("paperSize", "9") != "9" or setup.get("orientation", "portrait") != "portrait"):
         raise CertificateError("Los fondos QCP requieren páginas A4 verticales. Revisa el tamaño y la orientación del Excel.")
     if letterhead and setup is None:
         setup = ET.SubElement(sheet, f"{{{S}}}pageSetup", paperSize="9", orientation="portrait")
+    if letterhead and setup is not None:
+        setup.set("paperSize", "9")
+        setup.set("orientation", "portrait")
     if setup is not None:
         for key in list(setup.attrib):
             if key.startswith("{"):
@@ -249,9 +346,10 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         if drawing_rel is not None:
             drawing_path = related(sheet_path, drawing_rel.get("Target"))
             drawing_root = xml(parts[drawing_path])
-            image_rels = xml(parts[relationship_file(drawing_path)])
+            image_rels = xml(parts.get(relationship_file(drawing_path), b"<Relationships/>"))
             images = {rel.get("Id"): related(drawing_path, rel.get("Target")) for rel in image_rels}
-            guide_row = int(re.search(r"\d+", guide.get("r")).group()) - 1
+            signature_guide = guide if guide is not None else author
+            guide_row = int(re.search(r"\d+", signature_guide.get("r")).group()) - 1 if signature_guide is not None else None
             candidates = []
             for anchor in drawing_root:
                 point = anchor.find("d:from", NS)
@@ -260,7 +358,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
                     row = int(point.find("d:row", NS).text)
                     col = int(point.find("d:col", NS).text)
                     candidates.append((anchor, row, col, images.get(blip.get(f"{{{R}}}embed"))))
-            near_signature = [candidate for candidate in candidates if abs(candidate[1] - guide_row) <= 2]
+            near_signature = [candidate for candidate in candidates if guide_row is not None and abs(candidate[1] - guide_row) <= 2]
             signature_anchor = max(near_signature, key=lambda entry: entry[2], default=None) if author is not None else None
             removed_seals = 0
             for anchor, row, col, image_path in candidates:
@@ -270,7 +368,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
                     else:
                         embedded_signature = True
                     continue
-                if row < guide_row - 2 or not image_path or not image_path.lower().endswith((".png", ".jpeg", ".jpg")):
+                if guide_row is None or row < guide_row - 2 or not image_path or not image_path.lower().endswith((".png", ".jpeg", ".jpg")):
                     continue
                 with Image.open(BytesIO(parts[image_path])) as image:
                     if 0.85 <= image.width / image.height <= 1.15:
@@ -294,7 +392,10 @@ def convert_excel(data: bytes, replace_signature: bool = False,
     if not binary:
         raise CertificateError("La conversión de Excel necesita LibreOffice instalado en el servidor.")
     try:
+        if inspect_excel(data).preserve_format:
+            letterhead = None
         workbook, background, footer, embedded, warnings = _prepare_workbook(data, replace_signature, letterhead)
+        headers = header_pictures(workbook)
     except (KeyError, IndexError, ValueError, OSError, AttributeError, TypeError, zipfile.BadZipFile) as exc:
         if isinstance(exc, CertificateError):
             raise
@@ -317,10 +418,14 @@ def convert_excel(data: bytes, replace_signature: bool = False,
             if not 1 <= len(doc) <= MAX_PAGES:
                 raise CertificateError(f"El certificado convertido debe tener entre 1 y {MAX_PAGES} páginas.")
             background_xref = 0
+            background_digests = [letterhead.digest] if letterhead else []
             for index, page in enumerate(doc):
                 if background and letterhead is None:
                     background_xref = page.insert_image(page.rect, stream=background if not background_xref else None,
                                                         xref=background_xref, overlay=False)
+                    if not background_digests:
+                        background_digests.append(next(image["digest"] for image in page.get_image_info(hashes=True, xrefs=True)
+                                                       if image["xref"] == background_xref))
                 if footer:
                     text = footer.replace("&P", str(index + 1)).replace("&N", str(len(doc)))
                     text = re.sub(r'&[LCR]|&"[^"]*"|&\d+', "", text)
@@ -330,4 +435,6 @@ def convert_excel(data: bytes, replace_signature: bool = False,
                         page.insert_text((page.rect.width - width - 8, page.rect.height - 45 + line_index * 10), line, fontsize=6.5)
             if letterhead:
                 apply_letterhead(doc, letterhead)
-            return ConvertedExcel(doc.tobytes(garbage=4, deflate=True), embedded, warnings)
+            restore_header_pictures(doc, headers)
+            background_digests.extend(picture.digest for picture in headers[0])
+            return ConvertedExcel(doc.tobytes(garbage=4, deflate=True), embedded, warnings, tuple(background_digests))

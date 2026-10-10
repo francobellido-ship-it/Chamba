@@ -111,14 +111,13 @@ def test_corrupt_official_asset_is_rejected(synthetic_backgrounds):
         backgrounds.load_letterhead("acreditado")
 
 
-def test_same_margins_with_missing_existing_or_broken_embedded_background(synthetic_backgrounds):
+def test_fallback_keeps_saved_print_margins_and_rejects_missing_source_image(synthetic_backgrounds):
     chosen = backgrounds.load_letterhead("acreditado")
     variants = [workbook_bytes()]
     def add_picture(parts):
         sheet = ET.fromstring(parts["xl/worksheets/sheet2.xml"])
         ET.SubElement(sheet, f"{{{S}}}picture", {"{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id": "missing-background"})
         parts["xl/worksheets/sheet2.xml"] = ET.tostring(sheet)
-    variants.append(rewrite(workbook_bytes(), add_picture))
     margins = []
     for variant in variants:
         prepared, data, _, _, _ = _prepare_workbook(variant, False, chosen)
@@ -127,22 +126,26 @@ def test_same_margins_with_missing_existing_or_broken_embedded_background(synthe
             sheet = ET.fromstring(archive.read("xl/worksheets/sheet2.xml"))
             assert sheet.find(f"{{{S}}}picture") is None
             margins.append(sheet.find(f"{{{S}}}pageMargins").attrib)
-    assert margins[0] == margins[1]
-    assert margins[0]["left"] == "0.5" and margins[0]["top"] == "0.4"
-    assert margins[0]["header"] == "0"
+    assert margins[0]["left"] == "0.75" and margins[0]["top"] == "1.4"
+    assert margins[0]["header"] == "0.5"
+    with pytest.raises(CertificateError, match="Falta la imagen del fondo"):
+        _prepare_workbook(rewrite(workbook_bytes(), add_picture), False, chosen)
 
 
-def test_header_images_are_rejected_to_avoid_duplicate_official_headers(synthetic_backgrounds):
+def test_existing_header_prevents_adding_official_background(synthetic_backgrounds):
     chosen = backgrounds.load_letterhead("no_acreditado")
     def add_header_image(parts):
         sheet = ET.fromstring(parts["xl/worksheets/sheet2.xml"])
         header = sheet.find(f"{{{S}}}headerFooter")
         if header is None:
             header = ET.SubElement(sheet, f"{{{S}}}headerFooter")
-        ET.SubElement(header, f"{{{S}}}oddHeader").text = "&G"
+        ET.SubElement(header, f"{{{S}}}oddHeader").text = "&CENCABEZADO FICTICIO"
         parts["xl/worksheets/sheet2.xml"] = ET.tostring(sheet)
-    with pytest.raises(CertificateError, match="imágenes en el encabezado"):
-        _prepare_workbook(rewrite(workbook_bytes(), add_header_image), False, chosen)
+    prepared, background, footer, _, _ = _prepare_workbook(rewrite(workbook_bytes(), add_header_image), False, chosen)
+    assert background is None and footer == ""
+    with zipfile.ZipFile(BytesIO(prepared)) as archive:
+        sheet = ET.fromstring(archive.read("xl/worksheets/sheet2.xml"))
+        assert sheet.find(f"{{{S}}}headerFooter/{{{S}}}oddHeader").text == "&CENCABEZADO FICTICIO"
 
 
 @pytest.mark.parametrize("kind", ["acreditado", "no_acreditado"])

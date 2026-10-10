@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.pdf import CertificateError
 from app.documents import prepare_document
+from app.excel import inspect_excel
 from app.storage import DriveStorage, LocalStorage, StorageError, storage_from_environment
 from app.backgrounds import background_choices, require_background_type
 
@@ -48,7 +49,7 @@ class RequestGuard:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        is_upload = scope["method"] == "POST" and scope["path"] == "/api/certificates"
+        is_upload = scope["method"] == "POST" and scope["path"] in {"/api/certificates", "/api/excel/inspect"}
         if not is_upload:
             return await self.app(scope, receive, send)
         headers = dict(scope["headers"])
@@ -187,16 +188,18 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         if (excel is None) == (pdf is None):
             raise HTTPException(422, "Sube un Excel .xlsx o un PDF por solicitud.")
         source_type = "xlsx" if excel else "pdf"
-        if source_type == "xlsx":
-            try:
-                require_background_type(tipoCertificado)
-            except CertificateError as exc:
-                raise HTTPException(422, str(exc)) from exc
         document = excel or pdf
         filename = filename_safe(document.filename, source_type)
         if len(codigoCorrecto) > 40:
             raise HTTPException(422, "El código debe tener el formato QCP-0000-0000.")
         data = await read_upload(document, MAX_PDF_BYTES)
+        if source_type == "xlsx":
+            try:
+                layout = await asyncio.to_thread(inspect_excel, data)
+                if not layout.preserve_format:
+                    require_background_type(tipoCertificado)
+            except CertificateError as exc:
+                raise HTTPException(422, str(exc)) from exc
         signature = await read_upload(firma, MAX_SIGNATURE_BYTES) if firma else None
         certificate_id = str(uuid4())
         try:
@@ -217,8 +220,9 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                     "verificationUrl": verification_url,
                     "downloadUrl": f"/api/certificates/{certificate_id}/download"}
             if source_type == "xlsx":
-                info.update(certificateType=result.certificate_type, backgroundVerified=True,
-                            backgroundPages=result.background_pages)
+                info.update(certificateType=result.certificate_type, backgroundVerified=bool(result.background_pages),
+                            backgroundPages=result.background_pages, formatPreserved=result.format_preserved,
+                            sheetName=result.sheet_name)
             await asyncio.to_thread(store.save, certificate_id, result.data, info, publication)
         except StorageError:
             raise
@@ -230,6 +234,17 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         finally:
             app.state.processing.release()
         return info
+
+    @app.post("/api/excel/inspect")
+    async def inspect_workbook(excel: UploadFile = File(...)):
+        filename_safe(excel.filename, "xlsx")
+        data = await read_upload(excel, MAX_PDF_BYTES)
+        try:
+            layout = await asyncio.to_thread(inspect_excel, data)
+        except CertificateError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"sheetName": layout.sheet_name, "preserveFormat": layout.preserve_format,
+                "needsBackground": not layout.preserve_format}
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app

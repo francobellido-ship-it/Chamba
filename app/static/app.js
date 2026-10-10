@@ -5,13 +5,16 @@ let busy = false;
 let ready = false;
 const codes = new Map();
 const certificateTypes = new Map();
+const layouts = new Map();
+let inspectionQueue = Promise.resolve();
 let backgrounds = [];
 
 function needsBackground(file) {
-  return /\.xlsx$/i.test(file.name);
+  return /\.xlsx$/i.test(file.name) && layouts.get(file)?.data?.needsBackground === true;
 }
 
 function hasBackground(file) {
+  if (/\.xlsx$/i.test(file.name) && !layouts.get(file)?.data) return false;
   return !needsBackground(file) || backgrounds.some((option) =>
     option.available && option.value === certificateTypes.get(file));
 }
@@ -43,13 +46,31 @@ function renderFiles() {
     remove.textContent = "×";
     remove.disabled = busy;
     remove.setAttribute("aria-label", `Quitar ${file.name}`);
-    remove.addEventListener("click", () => { codes.delete(file); certificateTypes.delete(file); files.splice(index, 1); renderFiles(); });
+    remove.addEventListener("click", () => { codes.delete(file); certificateTypes.delete(file); layouts.delete(file); files.splice(index, 1); renderFiles(); });
     top.append(name, remove);
     row.append(top);
+    if (/\.xlsx$/i.test(file.name)) {
+      const layout = layouts.get(file);
+      const status = document.createElement("small");
+      status.className = "background-hint";
+      status.textContent = layout?.error || (layout?.data ?
+        `Hoja: ${layout.data.sheetName}. ${layout.data.preserveFormat ? "Conservaremos el fondo, encabezado y pie existentes." : "Esta hoja no incluye fondo, encabezado ni pie. Elige el fondo oficial."}` :
+        "Revisando la hoja y el formato del Excel…");
+      row.append(status);
+      if (layout?.error) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "remove";
+        retry.textContent = "Revisar de nuevo";
+        retry.disabled = busy;
+        retry.addEventListener("click", () => inspectFile(file));
+        row.append(retry);
+      }
+    }
     if (needsBackground(file)) {
       const typeLabel = document.createElement("label");
       typeLabel.className = "code-label type-label";
-      typeLabel.textContent = "Tipo de certificado · obligatorio";
+      typeLabel.textContent = "Fondo para esta hoja · obligatorio";
       const select = document.createElement("select");
       select.id = `type-${index}`;
       select.className = "code-input type-select";
@@ -75,7 +96,7 @@ function renderFiles() {
       row.append(typeLabel, select);
       const hint = document.createElement("small");
       hint.className = "background-hint";
-      hint.textContent = "Aplicaremos el fondo oficial en todas las páginas, aunque tu Excel no lo incluya.";
+      hint.textContent = "Añadiremos este fondo a todas las páginas porque la hoja no trae un formato propio.";
       row.append(hint);
     }
     const label = document.createElement("label");
@@ -98,6 +119,25 @@ function renderFiles() {
   updateSubmitState();
 }
 
+function inspectFile(file) {
+  layouts.set(file, { pending: true });
+  renderFiles();
+  inspectionQueue = inspectionQueue.then(async () => {
+    if (!files.includes(file)) return;
+    try {
+      const form = new FormData();
+      form.append("excel", file);
+      const response = await fetch("/api/excel/inspect", { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "No se pudo revisar el Excel.");
+      if (files.includes(file)) layouts.set(file, { data: result });
+    } catch (error) {
+      if (files.includes(file)) layouts.set(file, { error: error instanceof TypeError ? "No se pudo conectar. Revisa tu conexión y vuelve a intentar." : error.message });
+    }
+    renderFiles();
+  });
+}
+
 function addFiles(incoming) {
   if (busy || !ready) return;
   const errors = [];
@@ -107,6 +147,7 @@ function addFiles(incoming) {
     if (files.length >= 20) { errors.push("El lote admite hasta 20 archivos."); break; }
     if (files.some((other) => other.name === file.name && other.size === file.size && other.lastModified === file.lastModified)) continue;
     files.push(file);
+    if (/\.xlsx$/i.test(file.name)) inspectFile(file);
   }
   message(errors.join(" "));
   renderFiles();
@@ -137,8 +178,14 @@ function addResult(file, result, error) {
     card.append(detail);
   } else {
     const detail = document.createElement("p");
-    detail.textContent = `${result.finalCode || "Sin código único detectado"} · ${result.signatureIncluded ? "Con imagen de firma" : "Sin firma"}`;
+    detail.textContent = `${result.finalCode || "Sin código único detectado"} · ${result.signatureIncluded ? "Con imagen de firma" : "Sin firma añadida"}`;
     card.append(detail);
+    if (result.formatPreserved) {
+      const preserved = document.createElement("p");
+      preserved.className = "background-confirmation";
+      preserved.textContent = "Formato del Excel conservado · sin añadir otro fondo";
+      card.append(preserved);
+    }
     if (result.backgroundVerified) {
       const background = document.createElement("p");
       background.className = "background-confirmation";
@@ -186,7 +233,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (busy || !ready || !files.length) return;
   if (files.some((file) => !hasBackground(file))) {
-    return message("Selecciona Acreditado o No acreditado para cada Excel antes de continuar.");
+    return message("Espera la revisión del Excel y elige un fondo para las hojas que no tengan formato propio.");
   }
   const signature = $("signature").files[0];
   if (signature && (signature.size > 2 * 1024 * 1024 || !/\.(png|jpe?g)$/i.test(signature.name))) {
@@ -218,6 +265,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
         addResult(file, result, null);
         codes.delete(file);
         certificateTypes.delete(file);
+        layouts.delete(file);
         completed++;
       } catch (error) {
         failed.push(file);

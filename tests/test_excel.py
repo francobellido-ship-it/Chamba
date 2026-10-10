@@ -14,7 +14,7 @@ import pymupdf
 import pytest
 import zxingcpp
 
-from app.excel import S, convert_excel, _prepare_workbook
+from app.excel import S, convert_excel, _prepare_workbook, inspect_excel
 from app.main import create_app
 from app.pdf import CertificateError, prepare_pdf
 
@@ -161,7 +161,6 @@ def test_missing_cached_formula_results_are_rejected(cell):
 
 @pytest.mark.parametrize("old,new,error", [
     (b"Certificado", b"OtraHoja", "hoja llamada Certificado"),
-    (b"Escanee este QR", b"Sin marcador", "texto Escanee este QR"),
 ])
 def test_missing_template_markers_are_actionable(old, new, error):
     def replace(parts):
@@ -218,7 +217,7 @@ def test_template_collision_fails_without_adding_a_page():
 def test_template_without_visible_guide_fails():
     with pymupdf.open() as doc:
         doc.new_page().insert_text((50, 100), "No printed guide")
-        with pytest.raises(CertificateError, match="PDF convertido no contiene"):
+        with pytest.raises(CertificateError, match="identificar el espacio para el QR"):
             prepare_pdf(doc.tobytes(), "", "https://example.com/test", template=True)
 
 
@@ -231,3 +230,59 @@ def test_template_qr_only_on_main_page_when_guide_repeats():
     with pymupdf.open(stream=result.data, filetype="pdf") as doc:
         assert len(doc[0].get_images()) == 1
         assert not doc[1].get_images()
+
+
+def test_wrapped_guide_is_one_slot_and_keeps_qr_beside_it():
+    with pymupdf.open() as source:
+        page = source.new_page()
+        page.insert_textbox(pymupdf.Rect(200, 300, 255, 370), "Escanee este QR para consultar", fontsize=10)
+        result = prepare_pdf(source.tobytes(), "", "https://example.com/test", template=True)
+    with pymupdf.open(stream=result.data, filetype="pdf") as doc:
+        decoded = qr_images(doc)
+        assert [url for url, area in decoded] == ["https://example.com/test"]
+        assert decoded[0][1].x1 < 200
+        assert len(doc) == 1
+
+
+def test_multiple_actual_qr_guides_are_still_rejected():
+    with pymupdf.open() as source:
+        page = source.new_page()
+        page.insert_text((200, 300), "Escanee este QR")
+        page.insert_text((200, 500), "Escanee este QR")
+        with pytest.raises(CertificateError, match="varios espacios"):
+            prepare_pdf(source.tobytes(), "", "https://example.com/test", template=True)
+
+
+def two_certificate_sheets(data):
+    def adapt(parts):
+        workbook = ET.fromstring(parts["xl/workbook.xml"])
+        sheets = workbook.find(f"{{{S}}}sheets")
+        sheets[0].set("name", "CERTIFICADO")
+        sheets[1].set("name", "CERTIFICADO QCP")
+        workbook.remove(workbook.find(f"{{{S}}}definedNames"))
+        parts["xl/workbook.xml"] = ET.tostring(workbook)
+        sheet = ET.fromstring(parts["xl/worksheets/sheet2.xml"])
+        setup = sheet.find(f"{{{S}}}pageSetup")
+        setup.attrib.pop("paperSize", None)
+        parts["xl/worksheets/sheet2.xml"] = ET.tostring(sheet)
+    return rewrite(data, adapt)
+
+
+def test_correct_sheet_selected_without_print_area_and_no_google_write(tmp_path):
+    data = two_certificate_sheets(workbook_bytes())
+    layout = inspect_excel(data)
+    assert layout.sheet_name == "CERTIFICADO QCP"
+    assert not layout.preserve_format
+    with TestClient(create_app(tmp_path, "https://example.com")) as client:
+        check = client.post("/api/excel/inspect", files={"excel": ("test.xlsx", data)})
+        assert check.status_code == 200
+        assert check.json() == {"sheetName": "CERTIFICADO QCP", "preserveFormat": False, "needsBackground": True}
+        assert not list(tmp_path.iterdir())
+        response = client.post("/api/certificates", files={"excel": ("test.xlsx", data)}, data={"tipoCertificado": "no_acreditado"})
+        assert response.status_code == 201, response.text
+        assert response.json()["sheetName"] == "CERTIFICADO QCP"
+        with pymupdf.open(stream=client.get(response.json()["downloadUrl"]).content, filetype="pdf") as doc:
+            assert len(doc) == 2
+            assert all(abs(page.rect.width - 595.276) < 1 for page in doc)
+            assert "OTHER SHEET" not in "\n".join(page.get_text() for page in doc)
+            assert [url for url, _ in qr_images(doc)] == [response.json()["verificationUrl"]]
