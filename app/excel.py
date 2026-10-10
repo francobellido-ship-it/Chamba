@@ -15,6 +15,7 @@ from PIL import Image
 import pymupdf
 
 from app.pdf import CertificateError, MAX_PAGES
+from app.backgrounds import Letterhead, apply_letterhead
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -100,7 +101,8 @@ def _number_formats(data: bytes) -> bytes:
     return ET.tostring(styles, encoding="utf-8", xml_declaration=True)
 
 
-def _prepare_workbook(data: bytes, replace_signature: bool) -> tuple[bytes, bytes | None, str, bool, list[str]]:
+def _prepare_workbook(data: bytes, replace_signature: bool,
+                      letterhead: Letterhead | None = None) -> tuple[bytes, bytes | None, str, bool, list[str]]:
     try:
         source = zipfile.ZipFile(BytesIO(data))
     except zipfile.BadZipFile as exc:
@@ -197,19 +199,25 @@ def _prepare_workbook(data: bytes, replace_signature: bool) -> tuple[bytes, byte
     if not area_exists:
         raise CertificateError("Configura el área de impresión de la hoja Certificado antes de subirla.")
     # The QCP zero-margin background is rendered as a single page image, not tiled.
-    background = None
+    background = letterhead.data if letterhead else None
     footer = ""
     sheet_rels_path = relationship_file(sheet_path)
     sheet_rels = xml(parts[sheet_rels_path]) if sheet_rels_path in parts else ET.Element("rels")
     picture = sheet.find("s:picture", NS)
     if picture is not None:
         picture_rel = next((rel for rel in sheet_rels if rel.get("Id") == picture.get(f"{{{R}}}id")), None)
-        if picture_rel is not None:
+        if picture_rel is not None and letterhead is None:
             background = parts[related(sheet_path, picture_rel.get("Target"))]
             with Image.open(BytesIO(background)) as image:
                 if image.width * image.height > 12_000_000:
                     raise CertificateError("El fondo del Excel es demasiado grande.")
+        if picture_rel is not None and letterhead:
+            sheet_rels.remove(picture_rel)
+            parts[sheet_rels_path] = ET.tostring(sheet_rels, encoding="utf-8", xml_declaration=True)
         sheet.remove(picture)
+    if letterhead and (sheet.find("s:legacyDrawingHF", NS) is not None or any(
+            "&G" in (element.text or "") for element in sheet.findall("s:headerFooter/*", NS))):
+        raise CertificateError("El Excel contiene imágenes en el encabezado o pie. Retira esas imágenes; el portal aplicará el fondo oficial elegido.")
     footer_element = sheet.find("s:headerFooter/s:oddFooter", NS)
     if footer_element is not None:
         footer = footer_element.text or ""
@@ -219,10 +227,16 @@ def _prepare_workbook(data: bytes, replace_signature: bool) -> tuple[bytes, byte
         options.set("horizontalCentered", "0")
         options.set("verticalCentered", "0")
     margins = sheet.find("s:pageMargins", NS)
-    if background and margins is not None and all(float(margins.get(k, "0")) == 0 for k in ("left", "right", "top", "bottom")):
+    if letterhead and margins is None:
+        margins = ET.SubElement(sheet, f"{{{S}}}pageMargins")
+    if letterhead or (background and margins is not None and all(float(margins.get(k, "0")) == 0 for k in ("left", "right", "top", "bottom"))):
         # Leave room for the full-page QCP letterhead and footer from the example.
-        margins.attrib.update(left="0.5", right="0.5", top="0.4", bottom="0.18", footer="0.18")
+        margins.attrib.update(left="0.5", right="0.5", top="0.4", bottom="0.18", header="0", footer="0.18")
     setup = sheet.find("s:pageSetup", NS)
+    if letterhead and setup is not None and (setup.get("paperSize", "9") != "9" or setup.get("orientation", "portrait") != "portrait"):
+        raise CertificateError("Los fondos QCP requieren páginas A4 verticales. Revisa el tamaño y la orientación del Excel.")
+    if letterhead and setup is None:
+        setup = ET.SubElement(sheet, f"{{{S}}}pageSetup", paperSize="9", orientation="portrait")
     if setup is not None:
         for key in list(setup.attrib):
             if key.startswith("{"):
@@ -274,12 +288,13 @@ def _prepare_workbook(data: bytes, replace_signature: bool) -> tuple[bytes, byte
     return output.getvalue(), background, footer, embedded_signature, warnings
 
 
-def convert_excel(data: bytes, replace_signature: bool = False) -> ConvertedExcel:
+def convert_excel(data: bytes, replace_signature: bool = False,
+                  letterhead: Letterhead | None = None) -> ConvertedExcel:
     binary = shutil.which("soffice") or shutil.which("libreoffice")
     if not binary:
         raise CertificateError("La conversión de Excel necesita LibreOffice instalado en el servidor.")
     try:
-        workbook, background, footer, embedded, warnings = _prepare_workbook(data, replace_signature)
+        workbook, background, footer, embedded, warnings = _prepare_workbook(data, replace_signature, letterhead)
     except (KeyError, IndexError, ValueError, OSError, AttributeError, TypeError, zipfile.BadZipFile) as exc:
         if isinstance(exc, CertificateError):
             raise
@@ -303,7 +318,7 @@ def convert_excel(data: bytes, replace_signature: bool = False) -> ConvertedExce
                 raise CertificateError(f"El certificado convertido debe tener entre 1 y {MAX_PAGES} páginas.")
             background_xref = 0
             for index, page in enumerate(doc):
-                if background:
+                if background and letterhead is None:
                     background_xref = page.insert_image(page.rect, stream=background if not background_xref else None,
                                                         xref=background_xref, overlay=False)
                 if footer:
@@ -313,4 +328,6 @@ def convert_excel(data: bytes, replace_signature: bool = False) -> ConvertedExce
                     for line_index, line in enumerate(lines):
                         width = pymupdf.get_text_length(line, fontname="helv", fontsize=6.5)
                         page.insert_text((page.rect.width - width - 8, page.rect.height - 45 + line_index * 10), line, fontsize=6.5)
+            if letterhead:
+                apply_letterhead(doc, letterhead)
             return ConvertedExcel(doc.tobytes(garbage=4, deflate=True), embedded, warnings)

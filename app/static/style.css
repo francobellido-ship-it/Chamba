@@ -126,6 +126,10 @@ input::file-selector-button { cursor: pointer; border: 0; border-radius: 4px; pa
 .code-label { display: block; color: var(--muted); font-size: 11px; margin-top: 6px; }
 .code-input { width: 100%; margin-top: 5px; padding: 8px 10px; border: 1px solid #d4dfd8; background: white; color: var(--ink); border-radius: 5px; font-size: 12px; }
 .code-input::placeholder { color: #798b81; }
+.type-label { margin-top: 9px; color: var(--ink); font-weight: 600; }
+.type-select { font-family: inherit; cursor: pointer; }
+.background-hint { display: block; font-size: 10px; line-height: 1.5; color: var(--muted); margin: 5px 0 10px; }
+.result-card .background-confirmation { color: var(--accent-dark); }
 .results { margin-top: 25px; border-top: 1px solid var(--line); padding-top: 20px; }
 .results-heading { display: flex; justify-content: space-between; gap: 15px; align-items: center; }
 .results-heading h3 { font-size: 14px; font-weight: 650; margin: 0; }

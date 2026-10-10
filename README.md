@@ -2,6 +2,12 @@
 
 Aplicación web en español para convertir certificados Excel a PDF por lotes, con una imagen de firma y un QR por certificado. Basada en el comportamiento del flujo n8n **«Portal certificados QCP - lotes dinámicos v3»**, con una implementación independiente: no necesita n8n, QuickChart ni el servicio externo `pdf-code-fixer`.
 
+En cada Excel se elige **Acreditado** o **No acreditado**. La selección es obligatoria y determina el fondo oficial que se aplica a todas las páginas, incluso si el Excel no lo incluye. El fondo de la hoja se reemplaza por el seleccionado y los márgenes se normalizan para evitar cambios de posición cuando falta la imagen. La firma, datos guardados de fórmulas, QR y resolución original se conservan.
+
+Antes de guardar el PDF final, se comprueba su fondo página por página: imagen oficial, una aparición, resolución y posición de página completa detrás del contenido. Fondos ausentes, duplicados, desplazados, páginas fuera de A4 vertical e imágenes opacas que tapen el fondo completo detienen la emisión. Esto verifica el fondo y no sustituye la revisión de los datos de calibración. Los PDF que se suben directamente mantienen su contenido existente.
+
+Los dos originales se versionan en `app/assets/` y sus hashes se registran en `app/backgrounds.py`. El fondo acreditado se extrajo del Excel autorizado y el no acreditado del archivo proporcionado por el usuario, sin modificar las imágenes. Ambos conservan sus 2482 × 3508 píxeles y 300 dpi para impresión.
+
 ![Vista del portal en desarrollo](docs/portal.png)
 
 La pantalla usa el nombre y el emblema de **Quality Control Perú S.A.C.**, tomados del membrete de la plantilla proporcionada. Incluye una guía de tres pasos, contador de archivos, firma opcional desplegable y presentación adaptada a computadora y celular. La página de consulta comparte esa identidad visual. La ilustración del inicio es decorativa; los certificados se generan desde los archivos cargados.
@@ -54,7 +60,7 @@ Las pruebas generan Excel y PDFs ficticios; comprueban la conversión, resultado
 
 Usa un archivo `.xlsx` con una hoja llamada **Certificado**, área de impresión configurada y el texto **Escanee este QR** visible. La ubicación de la firma y los sellos se reconoce en el bloque de autorización de la plantilla QCP proporcionada; otras plantillas necesitan adaptación. Abre, calcula y guarda el archivo en Excel antes de subirlo: se rechazan fórmulas con errores o sin resultados guardados. No se admiten `.xls`, macros, archivos con contraseña u objetos incrustados.
 
-Se usa LibreOffice para convertir una copia temporal. Los fondos de hoja de la plantilla se aplican como una imagen completa debajo del contenido; las alturas de las filas se fijan para respetar los saltos. Los formatos numéricos de la plantilla usan coma decimal y espacio entre millares, como el PDF de referencia; se conservan el formato General, las fechas y los formatos con moneda o región explícita. Algunas tipografías de Microsoft se sustituyen por fuentes disponibles en el servidor y pueden producir pequeñas diferencias visuales. Revisa los primeros PDFs de cada plantilla antes de usarla habitualmente.
+Se usa LibreOffice para convertir una copia temporal. El fondo oficial elegido se aplica como una imagen completa debajo del contenido de cada página; las alturas de las filas se fijan para respetar los saltos. Los formatos numéricos de la plantilla usan coma decimal y espacio entre millares, como el PDF de referencia; se conservan el formato General, las fechas y los formatos con moneda o región explícita. Algunas tipografías de Microsoft se sustituyen por fuentes disponibles en el servidor y pueden producir pequeñas diferencias visuales. Revisa los primeros PDFs de cada plantilla antes de usarla habitualmente.
 
 Con el servidor arrancado, comprueba además una carga y descarga reales:
 

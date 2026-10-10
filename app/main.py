@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.pdf import CertificateError
 from app.documents import prepare_document
 from app.storage import DriveStorage, LocalStorage, StorageError, storage_from_environment
+from app.backgrounds import background_choices, require_background_type
 
 STATIC = Path(__file__).parent / "static"
 MAX_PDF_BYTES = 15 * 1024 * 1024
@@ -145,7 +146,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         return {"requiresAccessKey": False, "uploadsEnabled": store.ready,
                 "localMode": is_local and store.backend == "local", "storageBackend": store.backend,
                 "maxPdfMB": 15, "maxExcelMB": 15, "maxSignatureMB": 2, "maxPages": 100,
-                "inputFormats": ["xlsx", "pdf"]}
+                "inputFormats": ["xlsx", "pdf"], "certificateBackgrounds": background_choices()}
 
     @app.get("/")
     async def home():
@@ -180,12 +181,17 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
 
     @app.post("/api/certificates", status_code=201)
     async def create_certificate(excel: UploadFile | None = File(None), pdf: UploadFile | None = File(None), codigoCorrecto: str = Form(""),
-                                 firma: UploadFile | None = File(None)):
+                                 firma: UploadFile | None = File(None), tipoCertificado: str = Form("")):
         if not store.ready:
             raise StorageError("Falta completar la conexión con Google Drive. Contacta al administrador.")
         if (excel is None) == (pdf is None):
             raise HTTPException(422, "Sube un Excel .xlsx o un PDF por solicitud.")
         source_type = "xlsx" if excel else "pdf"
+        if source_type == "xlsx":
+            try:
+                require_background_type(tipoCertificado)
+            except CertificateError as exc:
+                raise HTTPException(422, str(exc)) from exc
         document = excel or pdf
         filename = filename_safe(document.filename, source_type)
         if len(codigoCorrecto) > 40:
@@ -201,7 +207,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
             publication = await asyncio.to_thread(store.allocate, certificate_id, origin)
             verification_url = publication.verification_url
             result = await asyncio.get_running_loop().run_in_executor(
-                app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature)
+                app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature, tipoCertificado)
             info = {"id": certificate_id, "filename": filename, "sourceType": source_type,
                     "createdAt": datetime.now(timezone.utc).isoformat(),
                     "detectedCodes": result.detected_codes, "finalCode": result.final_code,
@@ -210,6 +216,9 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                     "sha256": hashlib.sha256(result.data).hexdigest(),
                     "verificationUrl": verification_url,
                     "downloadUrl": f"/api/certificates/{certificate_id}/download"}
+            if source_type == "xlsx":
+                info.update(certificateType=result.certificate_type, backgroundVerified=True,
+                            backgroundPages=result.background_pages)
             await asyncio.to_thread(store.save, certificate_id, result.data, info, publication)
         except StorageError:
             raise

@@ -85,6 +85,8 @@ def workbook_bytes(code="QCP-2026-0001"):
 def qr_images(doc):
     decoded = []
     for info in doc[0].get_image_info(xrefs=True):
+        if pymupdf.Rect(info["bbox"]).get_area() > doc[0].rect.get_area() * 0.9:
+            continue
         # Render transparency against the page, as a scanner sees the PDF.
         pixmap = doc[0].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(info["bbox"]))
         image = Image.open(BytesIO(pixmap.tobytes("png")))
@@ -99,7 +101,8 @@ def test_excel_batch_has_distinct_qrs_and_preserves_layout_and_saved_results(tmp
         urls = []
         for index in range(2):
             response = client.post("/api/certificates", files={
-                "excel": (f"certificate-{index}.xlsx", workbook_bytes(f"QCP-2026-000{index + 1}"))})
+                "excel": (f"certificate-{index}.xlsx", workbook_bytes(f"QCP-2026-000{index + 1}"))},
+                data={"tipoCertificado": "acreditado"})
             assert response.status_code == 201, response.text
             result = response.json()
             assert result["filename"] == f"certificate-{index}.pdf"
@@ -114,8 +117,8 @@ def test_excel_batch_has_distinct_qrs_and_preserves_layout_and_saved_results(tmp
                 assert "OTHER SHEET" not in text
                 assert "SEGUNDA PAGINA" in doc[1].get_text()
                 assert result["finalCode"] in text
-                assert len(doc[0].get_image_info()) == 2  # Signature and QR, no circular seal.
-                assert not doc[1].get_image_info()
+                assert len(doc[0].get_image_info()) == 3  # Official background, signature and QR.
+                assert len(doc[1].get_image_info()) == 1  # Background only; no seal or QR.
                 decoded = qr_images(doc)
                 assert [url for url, area in decoded] == [result["verificationUrl"]]
                 area = decoded[0][1]
@@ -132,7 +135,7 @@ def test_optional_signature_replaces_existing_image_and_corrects_code(tmp_path):
         response = client.post("/api/certificates", files={
             "excel": ("certificate.xlsx", workbook_bytes()),
             "firma": ("signature.png", image_bytes((120, 40), "purple"))},
-            data={"codigoCorrecto": "QCP-2026-0099"})
+            data={"tipoCertificado": "acreditado", "codigoCorrecto": "QCP-2026-0099"})
         assert response.status_code == 201, response.text
         result = response.json()
         assert result["signatureIncluded"]
@@ -194,7 +197,8 @@ def test_converter_timeout_is_actionable(monkeypatch):
 def test_missing_or_ambiguous_upload_is_rejected(tmp_path):
     with TestClient(create_app(tmp_path, "https://example.com")) as client:
         assert client.post("/api/certificates").status_code == 422
-        response = client.post("/api/certificates", files={"excel": ("invalid.xlsx", b"invalid")})
+        response = client.post("/api/certificates", files={"excel": ("invalid.xlsx", b"invalid")},
+                               data={"tipoCertificado": "acreditado"})
         assert response.status_code == 422
         assert "Excel .xlsx válido" in response.json()["detail"]
         assert client.post("/api/certificates", files={
@@ -216,3 +220,14 @@ def test_template_without_visible_guide_fails():
         doc.new_page().insert_text((50, 100), "No printed guide")
         with pytest.raises(CertificateError, match="PDF convertido no contiene"):
             prepare_pdf(doc.tobytes(), "", "https://example.com/test", template=True)
+
+
+def test_template_qr_only_on_main_page_when_guide_repeats():
+    with pymupdf.open() as source:
+        for _ in range(2):
+            source.new_page().insert_text((200, 300), "Escanee este QR")
+        result = prepare_pdf(source.tobytes(), "", "https://example.com/test", template=True)
+    assert result.stamp_pages == [1]
+    with pymupdf.open(stream=result.data, filetype="pdf") as doc:
+        assert len(doc[0].get_images()) == 1
+        assert not doc[1].get_images()

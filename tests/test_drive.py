@@ -127,12 +127,16 @@ def test_drive_excel_survives_loss_of_local_storage_and_domain_change(tmp_path, 
         assert config["storageBackend"] == "drive"
         assert config["requiresAccessKey"] is False
         response = client.post("/api/certificates", files={
-            "excel": ("Certificado ficticio PERÚ.xlsx", workbook_bytes(), "application/octet-stream")})
+            "excel": ("Certificado ficticio PERÚ.xlsx", workbook_bytes(), "application/octet-stream")},
+            data={"tipoCertificado": "acreditado"})
         assert response.status_code == 201, response.text
         info = response.json()
         assert info["sourceType"] == "xlsx"
         assert info["signatureIncluded"] is True
         assert info["stampPages"] == [1]
+        assert info["certificateType"] == "acreditado"
+        assert info["backgroundVerified"] is True
+        assert info["backgroundPages"] == [1, 2]
         assert info["verificationUrl"] == f"https://drive.google.com/file/d/{info['driveFileId']}/view"
         download = client.get(info["downloadUrl"])
         assert download.status_code == 200

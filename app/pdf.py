@@ -1,6 +1,6 @@
 """Procesamiento local: corrección de texto, QR, imagen de firma y permisos PDF."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 import re
 import secrets
@@ -26,6 +26,8 @@ class PreparedPDF:
     warnings: list[str]
     stamp_pages: list[int]
     signature_included: bool
+    certificate_type: str | None = None
+    background_pages: list[int] = field(default_factory=list)
 
 
 def signature_png(data: bytes | None) -> bytes | None:
@@ -177,12 +179,13 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         stamped_pages = []
         appended = False
         if template:
-            for index, page in enumerate(doc):
-                for guide in page.search_for("Escanee este QR"):
-                    _insert_template_stamp(page, guide, qr_buffer.getvalue(), signature, verification_url)
-                    stamped_pages.append(index + 1)
-            if not stamped_pages:
+            guides = doc[0].search_for("Escanee este QR")
+            if not guides:
                 raise CertificateError("El PDF convertido no contiene el texto Escanee este QR. Revisa la plantilla y el área de impresión.")
+            if len(guides) != 1:
+                raise CertificateError("La primera página necesita un único texto Escanee este QR. Revisa la plantilla.")
+            _insert_template_stamp(doc[0], guides[0], qr_buffer.getvalue(), signature, verification_url)
+            stamped_pages.append(1)
         else:
             for index in range(original_pages):
                 page = doc[index]

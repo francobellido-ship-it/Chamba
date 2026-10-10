@@ -4,6 +4,21 @@ let files = [];
 let busy = false;
 let ready = false;
 const codes = new Map();
+const certificateTypes = new Map();
+let backgrounds = [];
+
+function needsBackground(file) {
+  return /\.xlsx$/i.test(file.name);
+}
+
+function hasBackground(file) {
+  return !needsBackground(file) || backgrounds.some((option) =>
+    option.available && option.value === certificateTypes.get(file));
+}
+
+function updateSubmitState() {
+  $("submit").disabled = busy || !ready || files.length === 0 || files.some((file) => !hasBackground(file));
+}
 
 function message(text) {
   $("load-error").textContent = text;
@@ -28,8 +43,41 @@ function renderFiles() {
     remove.textContent = "×";
     remove.disabled = busy;
     remove.setAttribute("aria-label", `Quitar ${file.name}`);
-    remove.addEventListener("click", () => { codes.delete(file); files.splice(index, 1); renderFiles(); });
+    remove.addEventListener("click", () => { codes.delete(file); certificateTypes.delete(file); files.splice(index, 1); renderFiles(); });
     top.append(name, remove);
+    row.append(top);
+    if (needsBackground(file)) {
+      const typeLabel = document.createElement("label");
+      typeLabel.className = "code-label type-label";
+      typeLabel.textContent = "Tipo de certificado · obligatorio";
+      const select = document.createElement("select");
+      select.id = `type-${index}`;
+      select.className = "code-input type-select";
+      select.required = true;
+      select.disabled = busy;
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Selecciona el tipo de certificado";
+      select.append(placeholder);
+      for (const background of backgrounds) {
+        const option = document.createElement("option");
+        option.value = background.value;
+        option.textContent = background.label + (background.available ? "" : " · no disponible");
+        option.disabled = !background.available;
+        select.append(option);
+      }
+      select.value = certificateTypes.get(file) || "";
+      select.addEventListener("change", () => {
+        certificateTypes.set(file, select.value);
+        updateSubmitState();
+      });
+      typeLabel.htmlFor = select.id;
+      row.append(typeLabel, select);
+      const hint = document.createElement("small");
+      hint.className = "background-hint";
+      hint.textContent = "Aplicaremos el fondo oficial en todas las páginas, aunque tu Excel no lo incluya.";
+      row.append(hint);
+    }
     const label = document.createElement("label");
     label.className = "code-label";
     label.textContent = "Código correcto · déjalo vacío para conservar el actual";
@@ -44,10 +92,10 @@ function renderFiles() {
     input.disabled = busy;
     input.addEventListener("input", () => codes.set(file, input.value));
     label.htmlFor = input.id;
-    row.append(top, label, input);
+    row.append(label, input);
     $("file-list").append(row);
   });
-  $("submit").disabled = busy || !ready || files.length === 0;
+  updateSubmitState();
 }
 
 function addFiles(incoming) {
@@ -91,6 +139,14 @@ function addResult(file, result, error) {
     const detail = document.createElement("p");
     detail.textContent = `${result.finalCode || "Sin código único detectado"} · ${result.signatureIncluded ? "Con imagen de firma" : "Sin firma"}`;
     card.append(detail);
+    if (result.backgroundVerified) {
+      const background = document.createElement("p");
+      background.className = "background-confirmation";
+      const label = backgrounds.find((option) => option.value === result.certificateType)?.label || "Fondo oficial";
+      const count = result.backgroundPages.length;
+      background.textContent = `${label} · Fondo verificado en ${count} ${count === 1 ? "página" : "páginas"}`;
+      card.append(background);
+    }
     for (const warning of result.warnings) {
       const text = document.createElement("p");
       text.className = "warning";
@@ -129,6 +185,9 @@ function addResult(file, result, error) {
 $("certificate-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (busy || !ready || !files.length) return;
+  if (files.some((file) => !hasBackground(file))) {
+    return message("Selecciona Acreditado o No acreditado para cada Excel antes de continuar.");
+  }
   const signature = $("signature").files[0];
   if (signature && (signature.size > 2 * 1024 * 1024 || !/\.(png|jpe?g)$/i.test(signature.name))) {
     return message("La firma debe ser PNG o JPG de hasta 2 MB.");
@@ -150,6 +209,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
       const form = new FormData();
       form.append(/\.xlsx$/i.test(file.name) ? "excel" : "pdf", file);
       form.append("codigoCorrecto", (codes.get(file) || "").trim());
+      if (needsBackground(file)) form.append("tipoCertificado", certificateTypes.get(file));
       if (signature) form.append("firma", signature);
       try {
         const response = await fetch("/api/certificates", { method: "POST", body: form });
@@ -157,6 +217,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
         if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "La carga no es válida.");
         addResult(file, result, null);
         codes.delete(file);
+        certificateTypes.delete(file);
         completed++;
       } catch (error) {
         failed.push(file);
@@ -182,6 +243,7 @@ async function initialize() {
     const response = await fetch("/api/config");
     if (!response.ok) throw new Error("El portal no está disponible.");
     const config = await response.json();
+    backgrounds = Array.isArray(config.certificateBackgrounds) ? config.certificateBackgrounds : [];
     $("local-notice").hidden = !config.localMode;
     ready = config.uploadsEnabled === true;
     $("setup-notice").hidden = ready;
