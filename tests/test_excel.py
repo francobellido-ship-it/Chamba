@@ -199,7 +199,7 @@ def test_missing_or_ambiguous_upload_is_rejected(tmp_path):
         response = client.post("/api/certificates", files={"excel": ("invalid.xlsx", b"invalid")},
                                data={"tipoCertificado": "acreditado"})
         assert response.status_code == 422
-        assert "Excel .xlsx válido" in response.json()["detail"]
+        assert "Excel .xlsx o .xlsm válido" in response.json()["detail"]
         assert client.post("/api/certificates", files={
             "excel": ("one.xlsx", b"test"), "pdf": ("two.pdf", b"test")}).status_code == 422
         assert not list(tmp_path.iterdir())

@@ -24,6 +24,7 @@ class HeaderPicture:
     dy: float
     crops: tuple[float, float, float, float]
     digest: bytes
+    full_page: bool = False
 
 
 def _points(value: str) -> float:
@@ -43,7 +44,8 @@ def header_pictures(workbook: bytes) -> tuple[list[HeaderPicture], dict[str, flo
     drawing = sheet.find("s:legacyDrawingHF", NS)
     margins = sheet.find("s:pageMargins", NS)
     positions = {key: float(margins.get(key, "0")) * 72 for key in ("left", "right", "header", "footer")} if margins is not None else dict(left=36, right=36, header=21.6, footer=21.6)
-    if header is None or not any("&G" in (e.text or "") for e in header):
+    has_marker = header is not None and any("&G" in (e.text or "") for e in header)
+    if not has_marker and drawing is None:
         return [], positions, False, False
     if drawing is None:
         raise CertificateError("El encabezado o pie referencia una imagen que falta en el Excel. Guarda una copia con la imagen incorporada.")
@@ -56,7 +58,7 @@ def header_pictures(workbook: bytes) -> tuple[list[HeaderPicture], dict[str, flo
     images = {rel.get("Id"): related(path, rel.get("Target")) for rel in xml(parts[relationship_file(path)])}
     scale = 1.0
     setup = sheet.find("s:pageSetup", NS)
-    if header.get("scaleWithDoc", "1") != "0" and setup is not None:
+    if header is not None and header.get("scaleWithDoc", "1") != "0" and setup is not None:
         scale = float(setup.get("scale", "100")) / 100
     pictures = []
     for shape in root.findall(f".//{{{V}}}shape"):
@@ -71,8 +73,14 @@ def header_pictures(workbook: bytes) -> tuple[list[HeaderPicture], dict[str, flo
         with Image.open(BytesIO(data)) as raster:
             if raster.width * raster.height > 12_000_000:
                 raise CertificateError("La imagen del encabezado o pie es demasiado grande.")
+            aspect = raster.width / raster.height
         style = dict(item.strip().split(":", 1) for item in shape.get("style", "").split(";") if ":" in item)
         width, height = _points(style.get("width", "0")) * scale, _points(style.get("height", "0")) * scale
+        full_page = (identity[1] == "CH" and _points(style.get("width", "0")) >= 500
+                     and _points(style.get("height", "0")) >= 700
+                     and abs(aspect - 595.276 / 841.890) < .01)
+        if not has_marker and not full_page:
+            continue
         if not 0 < width <= 2000 or not 0 < height <= 2000:
             raise CertificateError("El tamaño de una imagen del encabezado o pie no es válido.")
         crops = []
@@ -84,15 +92,18 @@ def header_pictures(workbook: bytes) -> tuple[list[HeaderPicture], dict[str, flo
             crops.append(crop)
         if crops[0] + crops[2] >= 1 or crops[1] + crops[3] >= 1:
             raise CertificateError("El recorte del encabezado o pie oculta toda su imagen.")
+        full_page = full_page and not any(crops)
         with pymupdf.open() as reference:
             reference.new_page().insert_image(pymupdf.Rect(0, 0, width, height), stream=data)
             digest = reference[0].get_image_info(hashes=True)[0]["digest"]
         pictures.append(HeaderPicture(data, identity[1], {"": "odd", "E": "even", "F": "first"}[identity[2]],
                                       width, height, _points(style.get("margin-left", "0")) * scale,
-                                      _points(style.get("margin-top", "0")) * scale, tuple(crops), digest))
+                                      _points(style.get("margin-top", "0")) * scale, tuple(crops), digest, full_page))
     if not pictures:
+        if not has_marker:
+            return [], positions, False, False
         raise CertificateError("No se pudo leer la imagen del encabezado o pie del Excel.")
-    return pictures, positions, header.get("differentFirst", "0") == "1", header.get("differentOddEven", "0") == "1"
+    return pictures, positions, header is not None and header.get("differentFirst", "0") == "1", header is not None and header.get("differentOddEven", "0") == "1"
 
 
 def restore_header_pictures(doc: pymupdf.Document, settings: tuple) -> None:
@@ -108,7 +119,7 @@ def restore_header_pictures(doc: pymupdf.Document, settings: tuple) -> None:
                  "R": page.rect.width - margins["right"] - picture.width}[picture.section[0]] + picture.dx
             y = (margins["header"] if picture.section[1] == "H" else
                  page.rect.height - margins["footer"] - picture.height) + picture.dy
-            area = pymupdf.Rect(x, y, x + picture.width, y + picture.height)
+            area = page.rect if picture.full_page else pymupdf.Rect(x, y, x + picture.width, y + picture.height)
             if any(image["digest"] == picture.digest and all(abs(a - b) < .1 for a, b in zip(image["bbox"], area)) for image in native):
                 continue
             if any(picture.crops):

@@ -10,11 +10,11 @@ let inspectionQueue = Promise.resolve();
 let backgrounds = [];
 
 function needsBackground(file) {
-  return /\.xlsx$/i.test(file.name) && layouts.get(file)?.data?.needsBackground === true;
+  return /\.xls[xm]$/i.test(file.name) && layouts.get(file)?.data?.needsBackground === true;
 }
 
 function hasBackground(file) {
-  if (/\.xlsx$/i.test(file.name) && !layouts.get(file)?.data) return false;
+  if (/\.xls[xm]$/i.test(file.name) && !layouts.get(file)?.data) return false;
   return !needsBackground(file) || backgrounds.some((option) =>
     option.available && option.value === certificateTypes.get(file));
 }
@@ -49,7 +49,7 @@ function renderFiles() {
     remove.addEventListener("click", () => { codes.delete(file); certificateTypes.delete(file); layouts.delete(file); files.splice(index, 1); renderFiles(); });
     top.append(name, remove);
     row.append(top);
-    if (/\.xlsx$/i.test(file.name)) {
+    if (/\.xls[xm]$/i.test(file.name)) {
       const layout = layouts.get(file);
       const status = document.createElement("small");
       status.className = "background-hint";
@@ -142,12 +142,12 @@ function addFiles(incoming) {
   if (busy || !ready) return;
   const errors = [];
   for (const file of incoming) {
-    if (!/\.(xlsx|pdf)$/i.test(file.name)) { errors.push(`${file.name}: selecciona un Excel .xlsx o un PDF.`); continue; }
+    if (!/\.(xlsx|xlsm|pdf)$/i.test(file.name)) { errors.push(`${file.name}: selecciona un Excel .xlsx, .xlsm o un PDF.`); continue; }
     if (file.size > 15 * 1024 * 1024) { errors.push(`${file.name}: supera los 15 MB.`); continue; }
     if (files.length >= 20) { errors.push("El lote admite hasta 20 archivos."); break; }
     if (files.some((other) => other.name === file.name && other.size === file.size && other.lastModified === file.lastModified)) continue;
     files.push(file);
-    if (/\.xlsx$/i.test(file.name)) inspectFile(file);
+    if (/\.xls[xm]$/i.test(file.name)) inspectFile(file);
   }
   message(errors.join(" "));
   renderFiles();
@@ -252,9 +252,15 @@ $("certificate-form").addEventListener("submit", async (event) => {
   let completed = 0;
   try {
     for (const [index, file] of batch.entries()) {
-      $("progress").textContent = `Procesando ${index + 1} de ${batch.length}: ${file.name}`;
+      const started = Date.now();
+      const updateProgress = () => {
+        const seconds = Math.floor((Date.now() - started) / 1000);
+        $("progress").textContent = `Procesando ${index + 1} de ${batch.length}: ${file.name}${seconds ? ` · ${seconds} s` : ""}${seconds >= 30 ? " · Esperando el resultado; mantén esta pestaña abierta." : ""}`;
+      };
+      updateProgress();
+      const timer = setInterval(updateProgress, 1000);
       const form = new FormData();
-      form.append(/\.xlsx$/i.test(file.name) ? "excel" : "pdf", file);
+      form.append(/\.xls[xm]$/i.test(file.name) ? "excel" : "pdf", file);
       form.append("codigoCorrecto", (codes.get(file) || "").trim());
       if (needsBackground(file)) form.append("tipoCertificado", certificateTypes.get(file));
       if (signature) form.append("firma", signature);
@@ -270,6 +276,8 @@ $("certificate-form").addEventListener("submit", async (event) => {
       } catch (error) {
         failed.push(file);
         addResult(file, null, error instanceof TypeError ? "No se pudo conectar con el portal. Revisa tu conexión e inténtalo de nuevo." : error.message);
+      } finally {
+        clearInterval(timer);
       }
     }
   } finally {

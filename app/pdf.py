@@ -8,8 +8,9 @@ import secrets
 from PIL import Image, ImageOps, UnidentifiedImageError
 import pymupdf
 import qrcode
+import zxingcpp
 
-CODE = re.compile(r"QCP-[0-9]{4}-[0-9]{4}", re.IGNORECASE)
+CODE = re.compile(r"QCP-\s*[0-9]{4}-[0-9]{4}", re.IGNORECASE)
 MAX_PAGES = 100
 
 
@@ -133,7 +134,7 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
                 signature: bytes | None = None, template: bool = False,
                 background_digests: tuple[bytes, ...] = ()) -> PreparedPDF:
     requested_code = requested_code.strip().upper()
-    if requested_code and not CODE.fullmatch(requested_code):
+    if requested_code and not re.fullmatch(r"QCP-[0-9]{4}-[0-9]{4}", requested_code):
         raise CertificateError("El código debe tener el formato QCP-0000-0000.")
     if not data.startswith(b"%PDF-"):
         raise CertificateError("El archivo no es un PDF válido.")
@@ -151,7 +152,8 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
             if any(widget.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE for widget in (page.widgets() or [])):
                 raise CertificateError("Este PDF contiene un campo de firma digital. No se modificará para preservar su firma.")
         original_text = "\n".join(page.get_text() for page in doc)
-        codes = list(dict.fromkeys(code.upper() for code in CODE.findall(original_text)))
+        raw_codes = list(dict.fromkeys(code.upper() for code in CODE.findall(original_text)))
+        codes = list(dict.fromkeys(re.sub(r"\s+", "", code) for code in raw_codes))
         warnings = []
         replacements = 0
         final_code = codes[0] if len(codes) == 1 else None
@@ -160,10 +162,11 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         elif len(codes) > 1:
             warnings.append("Se encontraron varios códigos distintos. Se conservaron todos sin cambios.")
         elif requested_code and requested_code != codes[0]:
-            replacements = _replace_code(doc, codes[0], requested_code)
+            replacements = sum(_replace_code(doc, code, requested_code) for code in raw_codes)
             final_code = requested_code
             resulting = "\n".join(page.get_text() for page in doc).upper()
-            if codes[0] in resulting or requested_code not in resulting:
+            remaining = [re.sub(r"\s+", "", code) for code in CODE.findall(resulting)]
+            if codes[0] in remaining or requested_code not in remaining:
                 raise CertificateError("No se pudo verificar el reemplazo completo del código.")
         signature = signature_png(signature)
         qr_buffer = BytesIO()
@@ -184,10 +187,12 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         if template:
             guides = _template_guides(doc[0])
             if not guides:
-                raise CertificateError("No se pudo identificar el espacio para el QR en la primera página. Revisa que su indicación se imprima en la hoja del certificado.")
-            if len(guides) != 1:
+                _replace_existing_template_qr(doc, qr_buffer.getvalue(), verification_url, signature)
+                warnings.append("Se actualizó el QR existente para enlazar al nuevo PDF; se conservó su ubicación.")
+            elif len(guides) != 1:
                 raise CertificateError("Se detectaron varios espacios para el QR en la primera página. Deja una sola indicación para ubicarlo.")
-            _insert_template_stamp(doc[0], guides[0], qr_buffer.getvalue(), signature, verification_url, background_digests)
+            else:
+                _insert_template_stamp(doc[0], guides[0], qr_buffer.getvalue(), signature, verification_url, background_digests)
             stamped_pages.append(1)
         else:
             for index in range(original_pages):
@@ -208,12 +213,43 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
             warnings.append("No había espacio libre suficiente. El QR y la firma opcional se colocaron en una página adicional.")
         elif not template and len(stamped_pages) < original_pages:
             warnings.append("El QR y la firma opcional se insertaron solo en las páginas con espacio libre.")
-        result = doc.tobytes(garbage=4, deflate=True,
+        result = doc.tobytes(garbage=4, deflate=True, use_objstms=1,
                              encryption=pymupdf.PDF_ENCRYPT_AES_256,
                              owner_pw=secrets.token_hex(16), user_pw="",
                              permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ |
                              pymupdf.PDF_PERM_ACCESSIBILITY)
         return PreparedPDF(result, codes, final_code, replacements, warnings, stamped_pages, bool(signature))
+
+
+def _replace_existing_template_qr(doc: pymupdf.Document, qr: bytes, url: str,
+                                 signature: bytes | None) -> None:
+    """Recognize a saved Drive QR instead of guessing a blank slot in a template."""
+    slots = []
+    page = doc[0]
+    for info in page.get_image_info(xrefs=True):
+        area = pymupdf.Rect(info["bbox"])
+        if not info["xref"] or not (45 <= area.width <= 130 and .8 <= area.width / area.height <= 1.2):
+            continue
+        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=area)
+        image = Image.open(BytesIO(pixmap.tobytes("png")))
+        decoded = zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormat.QRCode)
+        if len(decoded) == 1 and re.match(r"https://drive\.google\.com/file/d/[A-Za-z0-9_-]+/view(?:[?#]|$)", decoded[0].text):
+            slots.append((area, info["xref"]))
+    if len(slots) != 1:
+        raise CertificateError("No se pudo identificar el espacio para el QR de forma única en la primera página. Usa una indicación Escanee este QR o conserva un QR de Drive legible en su posición.")
+    area, xref = slots[0]
+    # Removing this image also removes repeated uses on later pages, without
+    # redacting the full-page background or any certificate text below it.
+    page.delete_image(xref)
+    for link in page.get_links():
+        if area.intersects(pymupdf.Rect(link["from"])):
+            page.delete_link(link)
+    side = min(area.width, area.height)
+    target = pymupdf.Rect(area.x0, area.y0, area.x0 + side, area.y0 + side)
+    page.insert_image(target, stream=qr)
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": target, "uri": url})
+    if signature:
+        raise CertificateError("Esta plantilla tiene un QR existente y un bloque de firma diferente. Conserva la firma del Excel o usa la plantilla con Autorizado y firmado por para reemplazarla.")
 
 
 def _template_guides(page: pymupdf.Page) -> list[pymupdf.Rect]:

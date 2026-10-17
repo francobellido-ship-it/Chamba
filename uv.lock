@@ -54,6 +54,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "qrcode", extra = ["pil"] },
     { name = "uvicorn" },
+    { name = "zxing-cpp" },
 ]
 
 [package.dev-dependencies]
@@ -72,6 +73,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20,<0.1" },
     { name = "qrcode", extras = ["pil"], specifier = ">=8.2,<9" },
     { name = "uvicorn", specifier = ">=0.37,<1" },
+    { name = "zxing-cpp", specifier = ">=2.3,<3" },
 ]
 
 [package.metadata.requires-dev]

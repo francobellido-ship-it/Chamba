@@ -89,9 +89,11 @@ async def read_upload(file: UploadFile, limit: int) -> bytes:
 def filename_safe(name: str | None, source_type: str = "pdf") -> str:
     name = (name or "CERTIFICADO.pdf").replace("\\", "/").split("/")[-1]
     name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip()
-    if not name.lower().endswith(f".{source_type}"):
-        raise HTTPException(422, f"El archivo debe tener extensión .{source_type}.")
-    return name[:-(len(source_type) + 1)][:176] + ".pdf"
+    extensions = ("xlsx", "xlsm") if source_type == "xlsx" else (source_type,)
+    extension = next((suffix for suffix in extensions if name.lower().endswith("." + suffix)), None)
+    if extension is None:
+        raise HTTPException(422, "El archivo debe tener extensión .xlsx o .xlsm." if source_type == "xlsx" else f"El archivo debe tener extensión .{source_type}.")
+    return name[:-(len(extension) + 1)][:176] + ".pdf"
 
 
 def create_app(storage_dir: Path | None = None, public_url: str | None = None,
@@ -147,7 +149,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         return {"requiresAccessKey": False, "uploadsEnabled": store.ready,
                 "localMode": is_local and store.backend == "local", "storageBackend": store.backend,
                 "maxPdfMB": 15, "maxExcelMB": 15, "maxSignatureMB": 2, "maxPages": 100,
-                "inputFormats": ["xlsx", "pdf"], "certificateBackgrounds": background_choices()}
+                "inputFormats": ["xlsx", "xlsm", "pdf"], "certificateBackgrounds": background_choices()}
 
     @app.get("/")
     async def home():
@@ -186,7 +188,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         if not store.ready:
             raise StorageError("Falta completar la conexión con Google Drive. Contacta al administrador.")
         if (excel is None) == (pdf is None):
-            raise HTTPException(422, "Sube un Excel .xlsx o un PDF por solicitud.")
+            raise HTTPException(422, "Sube un Excel .xlsx, .xlsm o un PDF por solicitud.")
         source_type = "xlsx" if excel else "pdf"
         document = excel or pdf
         filename = filename_safe(document.filename, source_type)
@@ -211,6 +213,9 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
             verification_url = publication.verification_url
             result = await asyncio.get_running_loop().run_in_executor(
                 app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature, tipoCertificado)
+            named_code = re.search(r"QCP-[0-9]{4}-[0-9]{4}", document.filename or "", re.I)
+            if named_code and result.final_code and named_code[0].upper() != result.final_code:
+                result.warnings.append(f"El nombre del archivo dice {named_code[0].upper()}, pero el certificado contiene {result.final_code}. Se conservó el código del documento.")
             info = {"id": certificate_id, "filename": filename, "sourceType": source_type,
                     "createdAt": datetime.now(timezone.utc).isoformat(),
                     "detectedCodes": result.detected_codes, "finalCode": result.final_code,

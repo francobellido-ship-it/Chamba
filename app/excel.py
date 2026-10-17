@@ -17,6 +17,9 @@ import pymupdf
 from app.pdf import CertificateError, MAX_PAGES
 from app.backgrounds import Letterhead, apply_letterhead
 from app.excel_headers import header_pictures, restore_header_pictures
+from app.excel_package import print_package
+from app.excel_pages import fit_stationery_content
+from app.pdf_images import compact_backgrounds
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -48,7 +51,7 @@ def _read_parts(data: bytes) -> dict[str, bytes]:
     try:
         source = zipfile.ZipFile(BytesIO(data))
     except zipfile.BadZipFile as exc:
-        raise CertificateError("El archivo debe ser un Excel .xlsx válido y sin contraseña.") from exc
+        raise CertificateError("El archivo debe ser un Excel .xlsx o .xlsm válido y sin contraseña.") from exc
     with source:
         entries = source.infolist()
         if len(entries) > 2000 or sum(e.file_size for e in entries) > 80 * 1024 * 1024:
@@ -194,7 +197,7 @@ def _number_formats(data: bytes) -> bytes:
 
 
 def _prepare_workbook(data: bytes, replace_signature: bool,
-                      letterhead: Letterhead | None = None) -> tuple[bytes, bytes | None, str, bool, list[str]]:
+                      letterhead: Letterhead | None = None, headers: tuple | None = None) -> tuple[bytes, bytes | None, str, bool, list[str]]:
     parts = _read_parts(data)
     layout = _layout(parts)
     if layout.preserve_format:
@@ -202,8 +205,6 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
     # Export saved results offline. Data connections are not needed for printing.
     discarded = {name for name in parts if name.startswith(("xl/externalLinks/", "xl/queryTables/"))
                  or name == "xl/connections.xml"}
-    if any(name.startswith("xl/embeddings/") for name in parts):
-        raise CertificateError("El Excel contiene objetos incrustados. Guarda una copia sin esos elementos.")
     for name in discarded:
         del parts[name]
     for name, content in list(parts.items()):
@@ -228,6 +229,18 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
     selected_index = layout.sheet_index
     sheet_path = layout.sheet_path
     sheet = xml(parts[sheet_path])
+    if sheet.find("s:oleObjects", NS) is not None:
+        raise CertificateError(f"La hoja {layout.sheet_name} contiene objetos incrustados. Convierte esos objetos en imágenes en una copia del Excel.")
+    headers = header_pictures(data) if headers is None else headers
+    # Page-sized stationery is placed once, behind the content, after export.
+    # Calc must not scale, crop or expand its header while printing the cells.
+    header = sheet.find("s:headerFooter", NS)
+    if header is not None:
+        for picture in headers[0]:
+            if picture.full_page:
+                element = header.find(f"s:{picture.variant}Header", NS)
+                if element is not None:
+                    element.text = (element.text or "").replace("&G", "")
     strings = []
     if "xl/sharedStrings.xml" in parts:
         strings = ["".join(item.itertext()) for item in xml(parts["xl/sharedStrings.xml"])]
@@ -237,15 +250,21 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         sheet.remove(queries)
     guide = next((cell for cell in cells if "escanee este qr" in cell_value(cell, strings).casefold()), None)
     author = next((cell for cell in cells if "autorizado y firma" in cell_value(cell, strings).casefold()), None)
+    hidden_rows = {row.get("r") for row in sheet.findall("s:sheetData/s:row", NS) if row.get("hidden") == "1"}
+    formula_errors = []
     for cell in cells:
         formula = cell.find("s:f", NS)
         if formula is not None:
             value = cell.find("s:v", NS)
+            hidden = re.search(r"\d+", cell.get("r", "0")).group() in hidden_rows
             if value is None or (value.text is None and cell.get("t") != "str"):
-                raise CertificateError("Hay fórmulas sin resultados guardados en Certificado. Abre el Excel en Excel, calcula y guarda antes de subirlo.")
-            if cell.get("t") == "e":
-                raise CertificateError("Hay errores de fórmula en Certificado. Corrígelos y guarda el Excel antes de subirlo.")
+                if not hidden:
+                    raise CertificateError(f"Hay fórmulas sin resultados guardados en {layout.sheet_name}, celda {cell.get('r')}. Abre el archivo en Excel, calcula y guarda antes de subirlo.")
+            if cell.get("t") == "e" and not hidden:
+                formula_errors.append(f"{cell.get('r')} ({value.text if value is not None else 'error'})")
             cell.remove(formula)
+    if formula_errors:
+        raise CertificateError(f"Hay errores de fórmula en {layout.sheet_name}: {', '.join(formula_errors[:8])}. Corrige esas celdas y guarda el Excel antes de subirlo.")
     for row in sheet.findall("s:sheetData/s:row", NS):
         if row.get("ht"):
             row.set("customHeight", "1")
@@ -262,7 +281,9 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         names = ET.SubElement(workbook, f"{{{S}}}definedNames")
     area_exists = False
     for name in list(names):
-        if name.get("localSheetId") == str(selected_index) and name.get("name") in {"_xlnm.Print_Area", "_xlnm.Print_Titles"}:
+        if name.get("localSheetId") == str(selected_index) and name.get("name") in {"_xlnm.Print_Area", "_xlnm.Print_Titles", "Print_Area", "Print_Titles"}:
+            if not name.get("name").startswith("_xlnm."):
+                name.set("name", "_xlnm." + name.get("name"))
             name.set("localSheetId", "0")
             area_exists |= name.get("name") == "_xlnm.Print_Area"
         else:
@@ -335,6 +356,9 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         setup.set("paperSize", "9")
         setup.set("orientation", "portrait")
     if setup is not None:
+        if int(setup.get("fitToWidth", "1")) > 1:
+            setup.set("fitToWidth", "1")
+            setup.set("fitToHeight", "0")
         for key in list(setup.attrib):
             if key.startswith("{"):
                 del setup.attrib[key]
@@ -379,11 +403,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
             parts[drawing_path] = ET.tostring(drawing_root, encoding="utf-8", xml_declaration=True)
     parts["xl/workbook.xml"] = ET.tostring(workbook, encoding="utf-8", xml_declaration=True)
     parts[sheet_path] = ET.tostring(sheet, encoding="utf-8", xml_declaration=True)
-    output = BytesIO()
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-        for name, content in parts.items():
-            archive.writestr(name, content)
-    return output.getvalue(), background, footer, embedded_signature, warnings
+    return print_package(parts, selected.get(f"{{{R}}}id")), background, footer, embedded_signature, warnings
 
 
 def convert_excel(data: bytes, replace_signature: bool = False,
@@ -394,8 +414,8 @@ def convert_excel(data: bytes, replace_signature: bool = False,
     try:
         if inspect_excel(data).preserve_format:
             letterhead = None
-        workbook, background, footer, embedded, warnings = _prepare_workbook(data, replace_signature, letterhead)
-        headers = header_pictures(workbook)
+        headers = header_pictures(data)
+        workbook, background, footer, embedded, warnings = _prepare_workbook(data, replace_signature, letterhead, headers)
     except (KeyError, IndexError, ValueError, OSError, AttributeError, TypeError, zipfile.BadZipFile) as exc:
         if isinstance(exc, CertificateError):
             raise
@@ -417,6 +437,7 @@ def convert_excel(data: bytes, replace_signature: bool = False,
         with pymupdf.open(pdf_path) as doc:
             if not 1 <= len(doc) <= MAX_PAGES:
                 raise CertificateError(f"El certificado convertido debe tener entre 1 y {MAX_PAGES} páginas.")
+            fit_stationery_content(doc, headers)
             background_xref = 0
             background_digests = [letterhead.digest] if letterhead else []
             for index, page in enumerate(doc):
@@ -437,4 +458,8 @@ def convert_excel(data: bytes, replace_signature: bool = False,
                 apply_letterhead(doc, letterhead)
             restore_header_pictures(doc, headers)
             background_digests.extend(picture.digest for picture in headers[0])
-            return ConvertedExcel(doc.tobytes(garbage=4, deflate=True), embedded, warnings, tuple(background_digests))
+            compact_backgrounds(doc, tuple(background_digests))
+            for page in doc:
+                page.clean_contents()
+            doc.subset_fonts()
+            return ConvertedExcel(doc.tobytes(garbage=4, deflate=True, use_objstms=1), embedded, warnings, tuple(background_digests))
