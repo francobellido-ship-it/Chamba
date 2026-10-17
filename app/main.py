@@ -13,7 +13,7 @@ from urllib.parse import quote, urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -28,6 +28,14 @@ MAX_PDF_BYTES = 15 * 1024 * 1024
 MAX_SIGNATURE_BYTES = 2 * 1024 * 1024
 MAX_REQUEST_BYTES = 18 * 1024 * 1024
 logger = logging.getLogger(__name__)
+
+
+def versioned_html(path: Path) -> str:
+    def asset(match):
+        name = match[1]
+        digest = hashlib.sha256((STATIC / name).read_bytes()).hexdigest()[:16]
+        return f"/static/{name}?v={digest}"
+    return re.sub(r"/static/([a-zA-Z0-9_.-]+\.(?:js|css))", asset, path.read_text(encoding="utf-8"))
 
 
 def local_url(url: str) -> bool:
@@ -122,6 +130,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
     app = FastAPI(title="Portal de certificados QCP", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(RequestGuard)
+    pages = {name: versioned_html(STATIC / name)
+             for name in ("index.html", "privacy.html", "terms.html", "verify.html")}
 
     @app.exception_handler(StorageError)
     async def storage_error(request, error):
@@ -138,6 +148,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         )
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path.startswith("/static/") or response.headers.get("content-type", "").startswith("text/html"):
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     @app.get("/healthz")
@@ -153,20 +165,20 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
 
     @app.get("/")
     async def home():
-        return FileResponse(STATIC / "index.html")
+        return HTMLResponse(pages["index.html"])
 
     @app.get("/privacidad")
     async def privacy():
-        return FileResponse(STATIC / "privacy.html")
+        return HTMLResponse(pages["privacy.html"])
 
     @app.get("/condiciones")
     async def terms():
-        return FileResponse(STATIC / "terms.html")
+        return HTMLResponse(pages["terms.html"])
 
     @app.get("/certificados/{certificate_id}")
     async def certificate_page(certificate_id: UUID):
         await asyncio.to_thread(store.metadata, str(certificate_id))
-        return FileResponse(STATIC / "verify.html", headers={"Cache-Control": "no-store"})
+        return HTMLResponse(pages["verify.html"], headers={"Cache-Control": "no-store"})
 
     @app.get("/api/certificates/{certificate_id}")
     async def details(certificate_id: UUID):
@@ -198,7 +210,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         if source_type == "xlsx":
             try:
                 layout = await asyncio.to_thread(inspect_excel, data)
-                if not layout.preserve_format:
+                if layout.needs_background:
                     require_background_type(tipoCertificado)
             except CertificateError as exc:
                 raise HTTPException(422, str(exc)) from exc
@@ -249,7 +261,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         except CertificateError as exc:
             raise HTTPException(422, str(exc)) from exc
         return {"sheetName": layout.sheet_name, "preserveFormat": layout.preserve_format,
-                "needsBackground": not layout.preserve_format}
+                "needsBackground": layout.needs_background}
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app

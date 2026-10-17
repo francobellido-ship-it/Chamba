@@ -178,11 +178,23 @@ def test_data_connections_are_removed_from_temporary_workbook():
         assert "xl/connections.xml" not in archive.namelist()
 
 
-def test_macro_workbook_is_rejected():
+def test_macro_workbook_prints_saved_values_without_vba():
     def add_macro(parts):
         parts["xl/vbaProject.bin"] = b"not executed"
-    with pytest.raises(CertificateError, match="sin macros"):
-        convert_excel(rewrite(workbook_bytes(), add_macro))
+        parts["xl/_rels/workbook.xml.rels"] = parts["xl/_rels/workbook.xml.rels"].replace(
+            b"</Relationships>", b'<Relationship Id="rVBA" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/></Relationships>')
+        parts["[Content_Types].xml"] = parts["[Content_Types].xml"].replace(
+            b"</Types>", b'<Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/></Types>')
+    data = rewrite(workbook_bytes(), add_macro)
+    prepared, *_, warnings = _prepare_workbook(data, False)
+    with zipfile.ZipFile(BytesIO(prepared)) as archive:
+        assert "xl/vbaProject.bin" not in archive.namelist()
+        assert b"vbaProject" not in archive.read("xl/_rels/workbook.xml.rels")
+        assert b"vbaProject" not in archive.read("[Content_Types].xml")
+    result = convert_excel(data)
+    assert any("sin ejecutar sus macros" in warning for warning in warnings)
+    with pymupdf.open(stream=result.pdf, filetype="pdf") as doc:
+        assert "17,5" in "\n".join(page.get_text() for page in doc)
 
 
 def test_converter_timeout_is_actionable(monkeypatch):

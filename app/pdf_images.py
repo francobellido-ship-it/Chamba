@@ -50,3 +50,6 @@ def compact_backgrounds(doc: pymupdf.Document, digests: tuple[bytes, ...]) -> No
             if compact != original:
                 doc.update_stream(xref, compact, compress=False)
                 doc.xref_set_key(xref, "Filter", "/DCTDecode")
+        # Each raster may decode to tens of MB. Release previews between pages;
+        # the PDF retains its original compressed pixels and colour profile.
+        pymupdf.TOOLS.store_shrink(100)

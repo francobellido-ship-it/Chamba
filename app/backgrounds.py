@@ -106,9 +106,11 @@ def apply_letterhead(doc: pymupdf.Document, selected: Letterhead) -> None:
     verify_letterhead(doc, selected)
 
 
-def verify_letterhead(doc: pymupdf.Document, selected: Letterhead) -> list[int]:
+def verify_letterhead(doc: pymupdf.Document, selected: Letterhead, pages: tuple[int, ...] | None = None) -> list[int]:
     verified = []
     for index, page in enumerate(doc):
+        if pages is not None and index + 1 not in pages:
+            continue
         _check_page_size(page)
         images = page.get_image_info(hashes=True, xrefs=True)
         matches = [info for info in images if info["digest"] == selected.digest]

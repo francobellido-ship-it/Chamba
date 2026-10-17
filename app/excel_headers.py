@@ -34,11 +34,11 @@ def _points(value: str) -> float:
     return float(match[1]) * {None: 1, "pt": 1, "px": .75, "in": 72, "cm": 72 / 2.54, "mm": 72 / 25.4}[match[2]]
 
 
-def header_pictures(workbook: bytes) -> tuple[list[HeaderPicture], dict[str, float], bool, bool]:
+def header_pictures(workbook: bytes, layout=None) -> tuple[list[HeaderPicture], dict[str, float], bool, bool]:
     # Imported lazily because the converter calls this module after initialization.
     from app.excel import _read_parts, _layout, xml, related, relationship_file, NS, R
     parts = _read_parts(workbook)
-    layout = _layout(parts)
+    layout = layout or _layout(parts)
     sheet = xml(parts[layout.sheet_path])
     header = sheet.find("s:headerFooter", NS)
     drawing = sheet.find("s:legacyDrawingHF", NS)
@@ -96,6 +96,7 @@ def header_pictures(workbook: bytes) -> tuple[list[HeaderPicture], dict[str, flo
         with pymupdf.open() as reference:
             reference.new_page().insert_image(pymupdf.Rect(0, 0, width, height), stream=data)
             digest = reference[0].get_image_info(hashes=True)[0]["digest"]
+        pymupdf.TOOLS.store_shrink(100)
         pictures.append(HeaderPicture(data, identity[1], {"": "odd", "E": "even", "F": "first"}[identity[2]],
                                       width, height, _points(style.get("margin-left", "0")) * scale,
                                       _points(style.get("margin-top", "0")) * scale, tuple(crops), digest, full_page))

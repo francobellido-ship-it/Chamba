@@ -1,5 +1,7 @@
 from io import BytesIO
 import hashlib
+import re
+import shutil
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -43,6 +45,28 @@ def test_home_config_and_health(client):
     config = client.get("/api/config").json()
     assert config["localMode"] is True
     assert config["requiresAccessKey"] is False
+
+
+def test_html_versions_assets_and_changes_the_url_after_an_update(tmp_path, monkeypatch):
+    from app import main
+    static = tmp_path / "static"
+    shutil.copytree(main.STATIC, static)
+    monkeypatch.setattr(main, "STATIC", static)
+    urls = []
+    for revision in range(2):
+        with TestClient(create_app(tmp_path / "store", "https://example.com")) as client:
+            home = client.get("/")
+            assert home.headers["cache-control"] == "no-cache"
+            url = re.search(r'src="(/static/app.js\?v=[a-f0-9]+)"', home.text)[1]
+            response = client.get(url)
+            assert response.content == (static / "app.js").read_bytes()
+            assert response.headers["cache-control"] == "no-cache"
+            assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
+            assert client.get("/api/config").headers["cache-control"] == "no-store"
+            urls.append(url)
+        with (static / "app.js").open("a") as file:
+            file.write("\n// next deployment\n")
+    assert urls[0] != urls[1]
 
 
 def test_upload_replace_and_download_end_to_end(client):

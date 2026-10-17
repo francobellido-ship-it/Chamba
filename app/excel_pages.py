@@ -5,11 +5,10 @@ import pymupdf
 from app.pdf import CertificateError
 
 
-def fit_stationery_content(doc: pymupdf.Document, headers: tuple) -> None:
-    if not any(picture.full_page for picture in headers[0]):
+def fit_stationery_content(doc: pymupdf.Document, headers: tuple, *, added_letterhead: bool = False) -> None:
+    if not added_letterhead and not any(picture.full_page for picture in headers[0]):
         return
-    # Native Excel backgrounds and page-sized header pictures are different:
-    # these templates store the stationery in the header, outside the cells.
+    # Fit after export so adding stationery cannot split a saved Excel page.
     for index, page in enumerate(doc):
         areas = [pymupdf.Rect(word[:4]) for word in page.get_text("words")]
         areas += [pymupdf.Rect(image["bbox"]) for image in page.get_image_info()]

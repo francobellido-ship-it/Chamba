@@ -126,7 +126,7 @@ def test_fallback_keeps_saved_print_margins_and_rejects_missing_source_image(syn
             sheet = ET.fromstring(archive.read("xl/worksheets/sheet2.xml"))
             assert sheet.find(f"{{{S}}}picture") is None
             margins.append(sheet.find(f"{{{S}}}pageMargins").attrib)
-    assert margins[0]["left"] == "0.75" and margins[0]["top"] == "1.4"
+    assert margins[0]["left"] == "0.75" and margins[0]["top"] == "1"
     assert margins[0]["header"] == "0.5"
     with pytest.raises(CertificateError, match="Falta la imagen del fondo"):
         _prepare_workbook(rewrite(workbook_bytes(), add_picture), False, chosen)

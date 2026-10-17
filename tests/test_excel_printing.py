@@ -121,6 +121,20 @@ def test_page_sized_header_fills_each_page_without_scaling_cropping_or_pixel_cha
             assert max(abs(a-b) for a,b in zip(images[0]["bbox"],page.rect)) < .01
 
 
+def test_added_letterhead_fits_content_after_export_without_losing_text_or_creating_pages():
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        page.insert_text((60, 55), "INICIO FICTICIO")
+        page.insert_text((60, 810), "FINAL FICTICIO")
+        before = [word[4] for word in page.get_text("words")]
+        fit_stationery_content(doc, ([], {}, False, False), added_letterhead=True)
+        assert len(doc) == 1
+        after = doc[0].get_text("words")
+        assert [word[4] for word in after] == before
+        assert min(word[1] for word in after) >= 100
+        assert max(word[3] for word in after) <= doc[0].rect.height - 42
+
+
 def test_existing_drive_qr_is_replaced_in_its_slot_without_a_text_guide():
     old = "https://drive.google.com/file/d/EXISTING_FICTITIOUS_FILE/view"
     new = "https://drive.google.com/file/d/NEW_FICTITIOUS_FILE/view"

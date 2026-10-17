@@ -70,7 +70,7 @@ function renderFiles() {
     if (needsBackground(file)) {
       const typeLabel = document.createElement("label");
       typeLabel.className = "code-label type-label";
-      typeLabel.textContent = "Fondo para esta hoja · obligatorio";
+      typeLabel.textContent = "Fondo para las hojas sin formato · obligatorio";
       const select = document.createElement("select");
       select.id = `type-${index}`;
       select.className = "code-input type-select";
@@ -96,7 +96,7 @@ function renderFiles() {
       row.append(typeLabel, select);
       const hint = document.createElement("small");
       hint.className = "background-hint";
-      hint.textContent = "Añadiremos este fondo a todas las páginas porque la hoja no trae un formato propio.";
+      hint.textContent = "Conservaremos los formatos existentes. Este fondo solo se añadirá a las hojas que no tengan uno.";
       row.append(hint);
     }
     const label = document.createElement("label");

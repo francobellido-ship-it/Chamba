@@ -13,7 +13,7 @@ def prepare_document(data: bytes, source_type: str, requested_code: str,
         # Validate the optional replacement before starting the Office conversion.
         signature = signature_png(signature)
         layout = inspect_excel(data)
-        letterhead = None if layout.preserve_format else load_letterhead(certificate_type)
+        letterhead = load_letterhead(certificate_type) if layout.needs_background else None
         converted = convert_excel(data, replace_signature=bool(signature), letterhead=letterhead)
         result = prepare_pdf(converted.pdf, requested_code, verification_url, signature, template=True,
                              background_digests=converted.background_digests)
@@ -22,9 +22,12 @@ def prepare_document(data: bytes, source_type: str, requested_code: str,
         # Validate the final encrypted PDF after QR, signature and code processing.
         if letterhead:
             with pymupdf.open(stream=result.data, filetype="pdf") as doc:
-                result.background_pages = verify_letterhead(doc, letterhead)
+                result.background_pages = verify_letterhead(doc, letterhead, converted.letterhead_pages)
             result.certificate_type = certificate_type
         result.format_preserved = layout.preserve_format
         result.sheet_name = layout.sheet_name
+        pymupdf.TOOLS.store_shrink(100)
         return result
-    return prepare_pdf(data, requested_code, verification_url, signature)
+    result = prepare_pdf(data, requested_code, verification_url, signature)
+    pymupdf.TOOLS.store_shrink(100)
+    return result
