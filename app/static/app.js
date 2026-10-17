@@ -54,7 +54,7 @@ function renderFiles() {
       const status = document.createElement("small");
       status.className = "background-hint";
       status.textContent = layout?.error || (layout?.data ?
-        `Hoja: ${layout.data.sheetName}. ${layout.data.preserveFormat ? "Conservaremos el fondo, encabezado y pie existentes." : "Esta hoja no incluye fondo, encabezado ni pie. Elige el fondo oficial."}` :
+        `${layout.data.selectionReason ? layout.data.selectionReason + " " : ""}Hoja: ${layout.data.sheetName}. ${layout.data.preserveFormat ? "Conservaremos el fondo, encabezado y pie existentes." : "Esta hoja no incluye fondo, encabezado ni pie. Elige el fondo oficial."}` :
         "Revisando la hoja y el formato del Excel…");
       row.append(status);
       if (layout?.error) {

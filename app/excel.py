@@ -21,6 +21,7 @@ from app.excel_package import print_package
 from app.excel_ranges import printed_cell_checker, print_names
 from app.excel_pages import fit_stationery_content
 from app.excel_auxiliary import omit_auxiliary_errors
+from app.excel_print_width import background_width_overflows
 from app.pdf_images import compact_backgrounds
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -50,6 +51,7 @@ class ExcelLayout:
     preserve_format: bool
     needs_background: bool = False
     page_numbers: tuple[int, ...] = ()
+    selection_reason: str = ""
 
 
 def _read_parts(data: bytes) -> dict[str, bytes]:
@@ -80,6 +82,10 @@ def _layout(parts: dict[str, bytes], sheet_index: int | None = None) -> ExcelLay
                for rel in rels if rel.get("TargetMode") != "External"}
     strings = (["".join(item.itertext()) for item in xml(parts["xl/sharedStrings.xml"])]
                if "xl/sharedStrings.xml" in parts else [])
+    reason = ""
+    if sheet_index is None:
+        from app.excel_variants import sensor_template
+        sheet_index, reason = sensor_template(parts, workbook, targets, strings)
     candidates = []
     for index, entry in enumerate(workbook.findall("s:sheets/s:sheet", NS)):
         name = entry.get("name", "")
@@ -123,7 +129,7 @@ def _layout(parts: dict[str, bytes], sheet_index: int | None = None) -> ExcelLay
                     row = anchor.find("d:from/d:row", NS)
                     if anchor.find(".//a:blip", NS) is not None and row is not None and int(row.text) < 5:
                         existing = True
-    return ExcelLayout(name, path, index, bool(existing), not bool(existing))
+    return ExcelLayout(name, path, index, bool(existing), not bool(existing), selection_reason=reason)
 
 
 def inspect_excel(data: bytes) -> ExcelLayout:
@@ -170,7 +176,8 @@ def cell_value(cell: ET.Element, strings: list[str]) -> str:
     if cell.get("t") == "s" and value is not None:
         return strings[int(value.text or "0")]
     if cell.get("t") == "inlineStr":
-        return "".join(cell.find("s:is", NS).itertext())
+        inline = cell.find("s:is", NS)
+        return "".join(inline.itertext()) if inline is not None else ""
     return value.text or "" if value is not None else ""
 
 
@@ -362,13 +369,29 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         setup.set("paperSize", "9")
         setup.set("orientation", "portrait")
     if setup is not None:
-        if int(setup.get("fitToWidth", "1")) > 1:
+        # Reserving side margins for a worksheet background can otherwise push
+        # the rightmost columns onto separate pages. Keep fixed-scale layouts
+        # elsewhere: fitting them can enlarge cells and add vertical pages.
+        overflowing_background = zero_margin_background and background_width_overflows(workbook, sheet, layout.sheet_name)
+        if overflowing_background:
+            margins.set("bottom", "0.62")
+        if overflowing_background or int(setup.get("fitToWidth", "1")) > 1:
             setup.set("fitToWidth", "1")
             setup.set("fitToHeight", "0")
+            properties = sheet.find("s:sheetPr", NS)
+            if properties is None:
+                properties = ET.Element(f"{{{S}}}sheetPr")
+                sheet.insert(0, properties)
+            page_properties = properties.find("s:pageSetUpPr", NS)
+            if page_properties is None:
+                page_properties = ET.SubElement(properties, f"{{{S}}}pageSetUpPr")
+            page_properties.set("fitToPage", "1")
         for key in list(setup.attrib):
             if key.startswith("{"):
                 del setup.attrib[key]
     warnings = []
+    if layout.selection_reason:
+        warnings.append(layout.selection_reason)
     if omitted_auxiliary_refs:
         warnings.append(f"Se omitieron errores auxiliares en celdas con texto blanco y fórmula oculta de {layout.sheet_name}: {', '.join(omitted_auxiliary_refs)}. El procesamiento continuó conservando los datos de medición.")
     if any("vbaproject" in name.lower() for name in parts):
@@ -467,12 +490,12 @@ def convert_excel(data: bytes, replace_signature: bool = False,
                         raise CertificateError(f"El certificado convertido debe tener entre 1 y {MAX_PAGES} páginas.")
                     if len(records) > 1 and len(section) != len(layout.page_numbers):
                         raise CertificateError(f"La hoja {layout.sheet_name} se dividió en {len(section)} páginas al imprimir. Revisa su área, escala y saltos de impresión para conservar la numeración del certificado.")
-                    fit_stationery_content(section, headers, added_letterhead=bool(selected))
+                    fit_stationery_content(section, headers, added_letterhead=bool(selected or background))
                     background_xref = 0
                     for index, page in enumerate(section):
                         if background and selected is None:
                             background_xref = page.insert_image(page.rect, stream=background if not background_xref else None,
-                                                                xref=background_xref, overlay=False)
+                                                                xref=background_xref, keep_proportion=False, overlay=False)
                             background_digests.append(next(image["digest"] for image in page.get_image_info(hashes=True, xrefs=True)
                                                            if image["xref"] == background_xref))
                         if footer:

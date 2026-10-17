@@ -79,9 +79,9 @@ def test_plain_print_names_and_excessive_horizontal_page_count_are_normalized():
         assert setup.get("fitToWidth") == "1" and setup.get("fitToHeight") == "0"
 
 
-def full_page_workbook(marker=True):
+def full_page_workbook(marker=True, section="CH"):
     def change(parts):
-        parts["xl/drawings/header.vml"] = (f'<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><v:shape id="CH" style="width:638.5pt;height:972pt"><v:imagedata o:relid="im0"/></v:shape></xml>').encode()
+        parts["xl/drawings/header.vml"] = (f'<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><v:shape id="{section}" style="width:638.5pt;height:972pt"><v:imagedata o:relid="im0"/></v:shape></xml>').encode()
         parts["xl/media/header0.png"] = image_bytes((248, 351), "#d8e8e1")
         root = ET.fromstring(parts["xl/worksheets/sheet2.xml"])
         header = root.find("s:headerFooter", NS)
@@ -97,8 +97,9 @@ def full_page_workbook(marker=True):
 
 
 @pytest.mark.parametrize("marker", [True, False])
-def test_page_sized_header_fills_each_page_without_scaling_cropping_or_pixel_changes(marker):
-    data = full_page_workbook(marker)
+@pytest.mark.parametrize("section", ["LH", "CH", "RH"])
+def test_page_sized_header_fills_each_page_without_scaling_cropping_or_pixel_changes(marker, section):
+    data = full_page_workbook(marker, section)
     settings = header_pictures(data)
     assert settings[0][0].full_page
     prepared, *_ = _prepare_workbook(data, False)
@@ -198,3 +199,42 @@ def test_redundant_jpeg_icc_is_removed_without_changing_pixels_or_pdf_colour_spa
         compact = doc.xref_stream_raw(xref)
         compact_backgrounds(doc, (digest,))
         assert doc.xref_stream_raw(xref) == compact
+
+
+@pytest.mark.parametrize("scale,rows", [(84,35), (50,80)])
+def test_zero_margin_background_keeps_right_columns_without_enlarging_saved_pages(scale, rows):
+    from app.excel import convert_excel
+    def wide(parts):
+        sheet = ET.fromstring(parts['xl/worksheets/sheet2.xml'])
+        sheet.find('s:pageMargins', NS).attrib.update(left='0', right='0', top='0', bottom='0')
+        sheet.find('s:sheetPr/s:pageSetUpPr', NS).set('fitToPage', '0')
+        sheet.find('s:pageSetup', NS).attrib.update(scale=str(scale), fitToHeight='0')
+        for column in sheet.findall('s:cols/s:col', NS):
+            column.set('width', '11')
+        sheet.remove(sheet.find('s:rowBreaks', NS))
+        row = sheet.find("s:sheetData/s:row[@r='25']", NS)
+        if row is None:
+            row = ET.SubElement(sheet.find('s:sheetData', NS), f'{{{S}}}row', r='25')
+        cell = ET.SubElement(row, f'{{{S}}}c', r='K25', t='inlineStr')
+        ET.SubElement(ET.SubElement(cell, f'{{{S}}}is'), f'{{{S}}}t').text = 'BORDE DERECHO'
+        ET.SubElement(sheet, f'{{{S}}}picture', {f'{{{R}}}id': 'background'})
+        parts['xl/worksheets/sheet2.xml'] = ET.tostring(sheet)
+        book = ET.fromstring(parts['xl/workbook.xml'])
+        book.find("s:definedNames/s:definedName[@name='_xlnm.Print_Area']", NS).text = f"'Certificado'!$A$1:$L${rows}"
+        parts['xl/workbook.xml'] = ET.tostring(book)
+        relationships = ET.fromstring(parts['xl/worksheets/_rels/sheet2.xml.rels'])
+        ET.SubElement(relationships, f'{{{P}}}Relationship', Id='background', Type=R+'/image', Target='../media/background.png')
+        parts['xl/worksheets/_rels/sheet2.xml.rels'] = ET.tostring(relationships)
+        parts['xl/media/background.png'] = image_bytes((248,351), '#d8e8e1')
+    data = rewrite(workbook_bytes(), wide)
+    converted = convert_excel(data)
+    with pymupdf.open(stream=converted.pdf,filetype='pdf') as doc:
+        assert len(doc) == 1
+        assert 'BORDE DERECHO' in doc[0].get_text()
+        assert '17,5' in doc[0].get_text()
+        words = doc[0].get_text('words')
+        assert all(word[0] >= 0 and word[2] <= doc[0].rect.width for word in words)
+        assert min(word[1] for word in words) >= 100
+        assert max(word[3] for word in words) <= doc[0].rect.height - 42
+        image = next(image for image in doc[0].get_image_info() if (image['width'], image['height']) == (248,351))
+        assert max(abs(a-b) for a,b in zip(image['bbox'], doc[0].rect)) < .01

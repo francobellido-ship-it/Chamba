@@ -260,8 +260,11 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
             layout = await asyncio.to_thread(inspect_excel, data)
         except CertificateError as exc:
             raise HTTPException(422, str(exc)) from exc
-        return {"sheetName": layout.sheet_name, "preserveFormat": layout.preserve_format,
-                "needsBackground": layout.needs_background}
+        result = {"sheetName": layout.sheet_name, "preserveFormat": layout.preserve_format,
+                  "needsBackground": layout.needs_background}
+        if layout.selection_reason:
+            result["selectionReason"] = layout.selection_reason
+        return result
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app

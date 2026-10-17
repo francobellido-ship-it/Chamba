@@ -76,7 +76,7 @@ def header_pictures(workbook: bytes, layout=None) -> tuple[list[HeaderPicture], 
             aspect = raster.width / raster.height
         style = dict(item.strip().split(":", 1) for item in shape.get("style", "").split(";") if ":" in item)
         width, height = _points(style.get("width", "0")) * scale, _points(style.get("height", "0")) * scale
-        full_page = (identity[1] == "CH" and _points(style.get("width", "0")) >= 500
+        full_page = (identity[1].endswith("H") and _points(style.get("width", "0")) >= 500
                      and _points(style.get("height", "0")) >= 700
                      and abs(aspect - 595.276 / 841.890) < .01)
         if not has_marker and not full_page:
