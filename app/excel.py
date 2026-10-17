@@ -20,6 +20,7 @@ from app.excel_headers import header_pictures, restore_header_pictures
 from app.excel_package import print_package
 from app.excel_ranges import printed_cell_checker, print_names
 from app.excel_pages import fit_stationery_content
+from app.excel_auxiliary import omit_auxiliary_errors
 from app.pdf_images import compact_backgrounds
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -259,6 +260,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
     guide = next((cell for cell in cells if "escanee este qr" in cell_value(cell, strings).casefold()), None)
     author = next((cell for cell in cells if "autorizado y firma" in cell_value(cell, strings).casefold()), None)
     printed = printed_cell_checker(workbook, sheet, selected_index, layout.sheet_name)
+    omitted_auxiliary_refs = omit_auxiliary_errors(sheet, xml(parts["xl/styles.xml"]), printed)
     formula_errors = []
     for cell in cells:
         formula = cell.find("s:f", NS)
@@ -367,6 +369,8 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
             if key.startswith("{"):
                 del setup.attrib[key]
     warnings = []
+    if omitted_auxiliary_refs:
+        warnings.append(f"Se omitieron errores auxiliares en celdas con texto blanco y fórmula oculta de {layout.sheet_name}: {', '.join(omitted_auxiliary_refs)}. El procesamiento continuó conservando los datos de medición.")
     if any("vbaproject" in name.lower() for name in parts):
         warnings.append("Se imprimieron los valores guardados del Excel sin ejecutar sus macros. El archivo original no se modificó.")
     embedded_signature = False

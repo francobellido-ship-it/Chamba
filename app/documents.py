@@ -1,7 +1,7 @@
 """Convert Excel certificates and share the existing PDF publication pipeline."""
 
 from app.excel import convert_excel, inspect_excel
-from app.pdf import PreparedPDF, prepare_pdf, signature_png
+from app.pdf import CertificateError, PreparedPDF, prepare_pdf, signature_png
 from app.backgrounds import load_letterhead, verify_letterhead
 import pymupdf
 
@@ -27,6 +27,8 @@ def prepare_document(data: bytes, source_type: str, requested_code: str,
         result.format_preserved = layout.preserve_format
         result.sheet_name = layout.sheet_name
         pymupdf.TOOLS.store_shrink(100)
+        if not result.detected_codes:
+            raise CertificateError("No se pudo verificar el código del certificado en la hoja impresa. Revisa ese dato esencial antes de emitirlo.")
         return result
     result = prepare_pdf(data, requested_code, verification_url, signature)
     pymupdf.TOOLS.store_shrink(100)
