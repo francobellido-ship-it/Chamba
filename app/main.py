@@ -196,7 +196,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
 
     @app.post("/api/certificates", status_code=201)
     async def create_certificate(excel: UploadFile | None = File(None), pdf: UploadFile | None = File(None), codigoCorrecto: str = Form(""),
-                                 firma: UploadFile | None = File(None), tipoCertificado: str = Form("")):
+                                 firma: UploadFile | None = File(None), tipoCertificado: str = Form(""),
+                                 codigoFormato: str = Form(''), versionFormato: str = Form('')):
         if not store.ready:
             raise StorageError("Falta completar la conexión con Google Drive. Contacta al administrador.")
         if (excel is None) == (pdf is None):
@@ -209,6 +210,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         data = await read_upload(document, MAX_PDF_BYTES)
         if source_type == "xlsx":
             try:
+                from app.excel_footers import entered_footer
+                entered_footer(codigoFormato,versionFormato)
                 layout = await asyncio.to_thread(inspect_excel, data)
                 if layout.needs_background:
                     require_background_type(tipoCertificado)
@@ -224,7 +227,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
             publication = await asyncio.to_thread(store.allocate, certificate_id, origin)
             verification_url = publication.verification_url
             result = await asyncio.get_running_loop().run_in_executor(
-                app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature, tipoCertificado)
+                app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature,
+                tipoCertificado, codigoFormato, versionFormato)
             named_code = re.search(r"QCP-[0-9]{4}-[0-9]{4}", document.filename or "", re.I)
             if named_code and result.final_code and named_code[0].upper() != result.final_code:
                 result.warnings.append(f"El nombre del archivo dice {named_code[0].upper()}, pero el certificado contiene {result.final_code}. Se conservó el código del documento.")
@@ -239,7 +243,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
             if source_type == "xlsx":
                 info.update(certificateType=result.certificate_type, backgroundVerified=bool(result.background_pages),
                             backgroundPages=result.background_pages, formatPreserved=result.format_preserved,
-                            sheetName=result.sheet_name)
+                            sheetName=result.sheet_name, formatFooterVerified=result.format_footer_verified)
             await asyncio.to_thread(store.save, certificate_id, result.data, info, publication)
         except StorageError:
             raise
@@ -264,6 +268,10 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                   "needsBackground": layout.needs_background}
         if layout.selection_reason:
             result["selectionReason"] = layout.selection_reason
+        from app.excel_footers import inspect_format_footer
+        footer = await asyncio.to_thread(inspect_format_footer,data)
+        if footer:
+            result['formatFooter'] = {'code':footer.code,'version':footer.version}
         return result
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

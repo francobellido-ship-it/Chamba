@@ -31,6 +31,7 @@ class PreparedPDF:
     background_pages: list[int] = field(default_factory=list)
     format_preserved: bool = False
     sheet_name: str | None = None
+    format_footer_verified: bool = False
 
 
 def signature_png(data: bytes | None) -> bytes | None:
@@ -185,14 +186,15 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         stamped_pages = []
         appended = False
         if template:
+            from app.pdf_qr import verify_template_qr
             guides = _template_guides(doc[0])
             if not guides:
-                _replace_existing_template_qr(doc, qr_buffer.getvalue(), verification_url, signature)
+                qr_area = _replace_existing_template_qr(doc, qr_buffer.getvalue(), verification_url, signature)
                 warnings.append("Se actualizó el QR existente para enlazar al nuevo PDF; se conservó su ubicación.")
             elif len(guides) != 1:
                 raise CertificateError("Se detectaron varios espacios para el QR en la primera página. Deja una sola indicación para ubicarlo.")
             else:
-                _insert_template_stamp(doc[0], guides[0], qr_buffer.getvalue(), signature, verification_url, background_digests)
+                qr_area = _insert_template_stamp(doc[0], guides[0], qr_buffer.getvalue(), signature, verification_url, background_digests)
             stamped_pages.append(1)
         else:
             for index in range(original_pages):
@@ -218,11 +220,14 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
                              owner_pw=secrets.token_hex(16), user_pw="",
                              permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ |
                              pymupdf.PDF_PERM_ACCESSIBILITY)
+        if template:
+            with pymupdf.open(stream=result,filetype='pdf') as final:
+                verify_template_qr(final, qr_area, verification_url, qr_buffer.getvalue(), guides[0] if guides else None)
         return PreparedPDF(result, codes, final_code, replacements, warnings, stamped_pages, bool(signature))
 
 
 def _replace_existing_template_qr(doc: pymupdf.Document, qr: bytes, url: str,
-                                 signature: bytes | None) -> None:
+                                 signature: bytes | None) -> pymupdf.Rect:
     """Recognize a saved Drive QR instead of guessing a blank slot in a template."""
     slots = []
     page = doc[0]
@@ -250,6 +255,7 @@ def _replace_existing_template_qr(doc: pymupdf.Document, qr: bytes, url: str,
     page.insert_link({"kind": pymupdf.LINK_URI, "from": target, "uri": url})
     if signature:
         raise CertificateError("Esta plantilla tiene un QR existente y un bloque de firma diferente. Conserva la firma del Excel o usa la plantilla con Autorizado y firmado por para reemplazarla.")
+    return target
 
 
 def _template_guides(page: pymupdf.Page) -> list[pymupdf.Rect]:
@@ -268,17 +274,20 @@ def _template_guides(page: pymupdf.Page) -> list[pymupdf.Rect]:
             areas = [pymupdf.Rect(box) for start, end, box in spans
                      if start < match.end() and end > match.start()]
             if areas:
-                # Use the first line's origin, preserving the established side slot.
-                guides.append(areas[0])
+                area = pymupdf.Rect(areas[0])
+                for other in areas[1:]:
+                    area |= other
+                guides.append(area)
     return guides
 
 
 def _insert_template_stamp(page: pymupdf.Page, guide: pymupdf.Rect, qr: bytes,
-                           signature: bytes | None, url: str, background_digests: tuple[bytes, ...] = ()) -> None:
+                           signature: bytes | None, url: str, background_digests: tuple[bytes, ...] = ()) -> pymupdf.Rect:
     """Place the QR beside the printed guide and the signature beside its author."""
     if page.rotation:
         raise CertificateError("La hoja Certificado debe imprimirse sin giro de página.")
-    qr_area = pymupdf.Rect(guide.x0 - 72, guide.y0 + 2.2, guide.x0 - 6, guide.y0 + 68.2)
+    from app.pdf_qr import qr_position
+    qr_area = qr_position(page, guide, qr)
     areas = [qr_area]
     signature_area = None
     if signature:
@@ -301,6 +310,7 @@ def _insert_template_stamp(page: pymupdf.Page, guide: pymupdf.Rect, qr: bytes,
     page.insert_link({"kind": pymupdf.LINK_URI, "from": qr_area, "uri": url})
     if signature_area is not None:
         page.insert_image(signature_area, stream=signature, keep_proportion=True)
+    return qr_area
 
 
 def _insert_stamp(page: pymupdf.Page, area: pymupdf.Rect, qr: bytes,

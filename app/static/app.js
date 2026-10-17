@@ -6,6 +6,7 @@ let ready = false;
 const codes = new Map();
 const certificateTypes = new Map();
 const layouts = new Map();
+const formatFooters = new Map();
 let inspectionQueue = Promise.resolve();
 let backgrounds = [];
 
@@ -46,7 +47,7 @@ function renderFiles() {
     remove.textContent = "×";
     remove.disabled = busy;
     remove.setAttribute("aria-label", `Quitar ${file.name}`);
-    remove.addEventListener("click", () => { codes.delete(file); certificateTypes.delete(file); layouts.delete(file); files.splice(index, 1); renderFiles(); });
+    remove.addEventListener("click", () => { codes.delete(file); certificateTypes.delete(file); layouts.delete(file); formatFooters.delete(file); files.splice(index, 1); renderFiles(); });
     top.append(name, remove);
     row.append(top);
     if (/\.xls[xm]$/i.test(file.name)) {
@@ -114,6 +115,37 @@ function renderFiles() {
     input.addEventListener("input", () => codes.set(file, input.value));
     label.htmlFor = input.id;
     row.append(label, input);
+    if (/\.xls[xm]$/i.test(file.name) && layouts.get(file)?.data) {
+      const detected = layouts.get(file).data.formatFooter;
+      const note = document.createElement("small");
+      note.className = "background-hint";
+      note.textContent = detected ? `Pie del formato: ${detected.code} · Versión ${detected.version}. Numeración automática.` :
+        "No se encontró el código y la versión del formato. Puedes completarlos abajo; la numeración será automática.";
+      row.append(note);
+      if (!detected) {
+        const details = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.textContent = "Pie del formato · completar si falta en el Excel";
+        details.append(summary);
+        const values = formatFooters.get(file) || { code: "", version: "" };
+        for (const [key, title, placeholder, limit] of [["code", "Código del formato", "F-GCA-…", 40], ["version", "Versión del formato", "La versión indicada por tu empresa", 16]]) {
+          const footerLabel = document.createElement("label");
+          footerLabel.className = "code-label";
+          footerLabel.textContent = title;
+          const field = document.createElement("input");
+          field.className = `code-input format-${key}`;
+          field.id = `format-${key}-${index}`;
+          field.value = values[key];
+          field.placeholder = placeholder;
+          field.maxLength = limit;
+          field.disabled = busy;
+          field.addEventListener("input", () => { values[key] = field.value; formatFooters.set(file, values); });
+          footerLabel.htmlFor = field.id;
+          details.append(footerLabel, field);
+        }
+        row.append(details);
+      }
+    }
     $("file-list").append(row);
   });
   updateSubmitState();
@@ -194,6 +226,12 @@ function addResult(file, result, error) {
       background.textContent = `${label} · Fondo verificado en ${count} ${count === 1 ? "página" : "páginas"}`;
       card.append(background);
     }
+    if (result.formatFooterVerified) {
+      const footer = document.createElement("p");
+      footer.className = "background-confirmation footer-confirmation";
+      footer.textContent = "Pie verificado · código del formato, versión y numeración de todas las páginas";
+      card.append(footer);
+    }
     for (const warning of result.warnings) {
       const text = document.createElement("p");
       text.className = "warning";
@@ -236,6 +274,9 @@ $("certificate-form").addEventListener("submit", async (event) => {
     return message("Espera la revisión del Excel y elige un fondo para las hojas que no tengan formato propio.");
   }
   const signature = $("signature").files[0];
+  if (files.some((file) => { const footer = formatFooters.get(file); return footer && Boolean(footer.code.trim()) !== Boolean(footer.version.trim()); })) {
+    return message("Completa el código y la versión del formato, o deja ambos vacíos para conservar lo disponible en el Excel.");
+  }
   if (signature && (signature.size > 2 * 1024 * 1024 || !/\.(png|jpe?g)$/i.test(signature.name))) {
     return message("La firma debe ser PNG o JPG de hasta 2 MB.");
   }
@@ -263,6 +304,11 @@ $("certificate-form").addEventListener("submit", async (event) => {
       form.append(/\.xls[xm]$/i.test(file.name) ? "excel" : "pdf", file);
       form.append("codigoCorrecto", (codes.get(file) || "").trim());
       if (needsBackground(file)) form.append("tipoCertificado", certificateTypes.get(file));
+      const footer = formatFooters.get(file);
+      if (footer?.code.trim() && footer?.version.trim()) {
+        form.append("codigoFormato", footer.code.trim());
+        form.append("versionFormato", footer.version.trim());
+      }
       if (signature) form.append("firma", signature);
       try {
         const response = await fetch("/api/certificates", { method: "POST", body: form });
@@ -272,6 +318,7 @@ $("certificate-form").addEventListener("submit", async (event) => {
         codes.delete(file);
         certificateTypes.delete(file);
         layouts.delete(file);
+        formatFooters.delete(file);
         completed++;
       } catch (error) {
         failed.push(file);

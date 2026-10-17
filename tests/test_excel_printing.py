@@ -234,7 +234,9 @@ def test_zero_margin_background_keeps_right_columns_without_enlarging_saved_page
         assert '17,5' in doc[0].get_text()
         words = doc[0].get_text('words')
         assert all(word[0] >= 0 and word[2] <= doc[0].rect.width for word in words)
-        assert min(word[1] for word in words) >= 100
-        assert max(word[3] for word in words) <= doc[0].rect.height - 42
+        body_words = [word for word in words if word[1] < doc[0].rect.height - 44]
+        assert min(word[1] for word in body_words) >= 100
+        assert max(word[3] for word in body_words) <= doc[0].rect.height - 42
+        assert 'Página 1 de 1' in doc[0].get_text(clip=pymupdf.Rect(0,doc[0].rect.height-44,doc[0].rect.width,doc[0].rect.height))
         image = next(image for image in doc[0].get_image_info() if (image['width'], image['height']) == (248,351))
         assert max(abs(a-b) for a,b in zip(image['bbox'], doc[0].rect)) < .01

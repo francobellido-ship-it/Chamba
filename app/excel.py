@@ -22,6 +22,7 @@ from app.excel_ranges import printed_cell_checker, print_names
 from app.excel_pages import fit_stationery_content
 from app.excel_auxiliary import omit_auxiliary_errors
 from app.excel_print_width import background_width_overflows
+from app.excel_footers import FormatFooter, take_format_footers, footer_for_page, apply_format_footers, general_data_footer, entered_footer
 from app.pdf_images import compact_backgrounds
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -41,6 +42,7 @@ class ConvertedExcel:
     warnings: list[str]
     background_digests: tuple[bytes, ...] = ()
     letterhead_pages: tuple[int, ...] | None = None
+    format_footers: tuple[FormatFooter | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -248,6 +250,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
     if sheet.find("s:oleObjects", NS) is not None:
         raise CertificateError(f"La hoja {layout.sheet_name} contiene objetos incrustados. Convierte esos objetos en imágenes en una copia del Excel.")
     headers = header_pictures(data, layout) if headers is None else headers
+    take_format_footers(sheet)
     # Page-sized stationery is placed once, behind the content, after export.
     # Calc must not scale, crop or expand its header while printing the cells.
     header = sheet.find("s:headerFooter", NS)
@@ -440,7 +443,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
 
 
 def convert_excel(data: bytes, replace_signature: bool = False,
-                  letterhead: Letterhead | None = None) -> ConvertedExcel:
+                  letterhead: Letterhead | None = None, format_code: str = '', format_version: str = '') -> ConvertedExcel:
     from app.excel_sheets import certificate_layouts
     binary = shutil.which("soffice") or shutil.which("libreoffice")
     if not binary:
@@ -448,15 +451,25 @@ def convert_excel(data: bytes, replace_signature: bool = False,
     try:
         layouts = certificate_layouts(data)
         records, warnings = [], []
+        original_parts = _read_parts(data)
+        fallback_footer = general_data_footer(original_parts) or entered_footer(format_code, format_version)
+        primary_footer = take_format_footers(xml(original_parts[layouts[0].sheet_path]))
+        fallback_footer = primary_footer.get('odd') or next(iter(primary_footer.values()),None) or fallback_footer
         for index, layout in enumerate(layouts):
             selected = None if layout.preserve_format else letterhead
             headers = header_pictures(data, layout)
             workbook, background, footer, embedded, notes = _prepare_workbook(
                 data, replace_signature and index == 0, selected, headers, layout)
-            records.append((layout, workbook, background, footer, embedded, headers, selected))
+            settings = take_format_footers(xml(original_parts[layout.sheet_path]))
+            if fallback_footer:
+                settings.setdefault('odd',fallback_footer)
+            records.append((layout, workbook, background, footer, embedded, headers, selected, settings))
             warnings.extend(notes)
         if len(layouts) > 1:
             warnings.append(f"Se incluyeron las {len(layouts)} hojas del certificado en el orden de su numeración.")
+        if any(not record[7] for record in records):
+            warnings.append('No se encontró el código y la versión del formato del certificado en el pie ni en Datos generales. Se conservó la numeración; puedes completar esos datos en Pie del formato sin cambiar las mediciones.')
+        del original_parts
     except (KeyError, IndexError, ValueError, OSError, AttributeError, TypeError, zipfile.BadZipFile) as exc:
         if isinstance(exc, CertificateError):
             raise
@@ -483,8 +496,9 @@ def convert_excel(data: bytes, replace_signature: bool = False,
             raise CertificateError("LibreOffice no pudo convertir este Excel. Revisa su formato y área de impresión.")
         with pymupdf.open() as doc:
             background_digests, letterhead_pages = [], []
+            format_footers = []
             for sheet_index, record in enumerate(records):
-                layout, _, background, footer, _, headers, selected = record
+                layout, _, background, footer, _, headers, selected, footer_settings = record
                 with pymupdf.open(Path(inputs[sheet_index]).with_suffix(".pdf")) as section:
                     if len(section) < 1 or len(doc) + len(section) > MAX_PAGES:
                         raise CertificateError(f"El certificado convertido debe tener entre 1 y {MAX_PAGES} páginas.")
@@ -509,13 +523,15 @@ def convert_excel(data: bytes, replace_signature: bool = False,
                         background_digests.append(selected.digest)
                         letterhead_pages.extend(range(len(doc) + 1, len(doc) + len(section) + 1))
                     restore_header_pictures(section, headers)
+                    format_footers.extend(footer_for_page(footer_settings, index, headers) for index in range(len(section)))
                     background_digests.extend(picture.digest for picture in headers[0])
                     doc.insert_pdf(section)
                     pymupdf.TOOLS.store_shrink(100)
             background_digests = tuple(dict.fromkeys(background_digests))
+            apply_format_footers(doc, format_footers)
             compact_backgrounds(doc, background_digests)
             for page in doc:
                 page.clean_contents()
             doc.subset_fonts()
             return ConvertedExcel(doc.tobytes(garbage=4, deflate=True, use_objstms=1), records[0][4],
-                                  list(dict.fromkeys(warnings)), background_digests, tuple(letterhead_pages))
+                                  list(dict.fromkeys(warnings)), background_digests, tuple(letterhead_pages), tuple(format_footers))

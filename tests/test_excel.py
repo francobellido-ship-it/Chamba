@@ -124,7 +124,10 @@ def test_excel_batch_has_distinct_qrs_and_preserves_layout_and_saved_results(tmp
                 area = decoded[0][1]
                 guide = doc[0].search_for("Escanee este QR")[0]
                 assert area.x1 < guide.x0
-                assert abs(area.y0 - guide.y0) < 3
+                from app.pdf import _template_guides
+                from app.pdf_qr import instruction_block
+                caption = instruction_block(doc[0], _template_guides(doc[0])[0])
+                assert abs((area.y0+area.y1-caption.y0-caption.y1)/2) < max(1,(area.height-caption.height)/2+1)
                 urls.append(result["verificationUrl"])
             assert client.get(f"/certificados/{result['id']}").status_code == 200
         assert urls[0] != urls[1]
