@@ -69,6 +69,10 @@ La copia temporal contiene únicamente la hoja del certificado y los recursos qu
 
 Cuando falta el área de impresión, se centra horizontalmente el rango inferido sin cambiar los márgenes guardados. Los encabezados de tabla sombreados con texto ajustado en Arial, Calibri o Carlito pueden ganar altura tomando solo espacio vacío inmediatamente anterior: se mantiene la altura total del bloque, los valores, las celdas combinadas y los saltos de página. No se aplica este ajuste si hay dibujos en la hoja, combinaciones verticales o espacio insuficiente; esos formatos requieren revisión visual. La reducción del contenido entre membrete y pie se realiza alrededor del centro horizontal de la página.
 
+Cuando una hoja contiene una serie completa «Página N de M» inmediatamente debajo de sus títulos repetidos, el conversor usa esos inicios para imprimir cada bloque en su página prevista. Recorta solo filas finales vacías y limita los tramos largos de espacio vacío interior; conserva celdas combinadas, párrafos, valores e imágenes y protege el espacio de sus anclajes. No sustituye saltos explícitos que contradigan esa numeración ni intenta adivinar el diseño de formatos sin esas señales. Una celda combinada o imagen que cruce las páginas previstas requiere revisión antes de emitir.
+
+En certificados con páginas numeradas se comprueban también el número de páginas y sus etiquetas impresas. En hojas con varias páginas numeradas, los cuadros detectados en el PDF se validan antes de añadir el fondo: sus textos deben caber dentro de las celdas y tener al menos 6,5 puntos. Si la composición deja texto recortado, una numeración ilegible o tablas demasiado pequeñas, se detiene la emisión con un mensaje; no se eliminan datos para forzar el ajuste. Estas comprobaciones complementan la revisión visual y no identifican todos los diseños de tabla posibles.
+
 Con el servidor arrancado, comprueba además una carga y descarga reales:
 
 ```sh

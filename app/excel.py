@@ -25,6 +25,7 @@ from app.excel_print_width import background_width_overflows
 from app.excel_footers import FormatFooter, take_format_footers, footer_for_page, apply_format_footers, general_data_footer, entered_footer
 from app.pdf_images import compact_backgrounds
 from app.excel_rows import fit_table_headings
+from app.excel_composition import compose_numbered_pages, drawing_row_ranges, validate_page_labels, validate_table_text
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -413,6 +414,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
     if any("vbaproject" in name.lower() for name in parts):
         warnings.append("Se imprimieron los valores guardados del Excel sin ejecutar sus macros. El archivo original no se modificó.")
     embedded_signature = False
+    drawing_ranges = ()
     drawing = sheet.find("s:drawing", NS)
     if drawing is not None:
         drawing_rel = next((rel for rel in sheet_rels if rel.get("Id") == drawing.get(f"{{{R}}}id")), None)
@@ -450,6 +452,11 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
             if removed_seals:
                 warnings.append("Se omitieron los sellos del Excel para conservar solo la firma, como en la referencia.")
             parts[drawing_path] = ET.tostring(drawing_root, encoding="utf-8", xml_declaration=True)
+            drawing_ranges = drawing_row_ranges(drawing_root, sheet)
+    composed = compose_numbered_pages(workbook, sheet, layout.sheet_name,
+                                     xml(parts["xl/styles.xml"]), strings, cell_value, drawing_ranges)
+    if composed:
+        warnings.append(f"Se organizaron {len(composed)} páginas según la numeración de la plantilla, conservando los cuadros completos y reduciendo espacios vacíos excesivos.")
     parts["xl/workbook.xml"] = ET.tostring(workbook, encoding="utf-8", xml_declaration=True)
     parts[sheet_path] = ET.tostring(sheet, encoding="utf-8", xml_declaration=True)
     return print_package(parts, selected.get(f"{{{R}}}id")), background, footer, embedded_signature, warnings
@@ -482,6 +489,7 @@ def convert_excel(data: bytes, replace_signature: bool = False,
             warnings.append(f"Se incluyeron las {len(layouts)} hojas del certificado en el orden de su numeración.")
         if any(not record[7] for record in records):
             warnings.append('No se encontró el código y la versión del formato del certificado en el pie ni en Datos generales. Se conservó la numeración; puedes completar esos datos en Pie del formato sin cambiar las mediciones.')
+        numbered_total = max((n for record in records for n in record[0].page_numbers), default=0)
         del original_parts
     except (KeyError, IndexError, ValueError, OSError, AttributeError, TypeError, zipfile.BadZipFile) as exc:
         if isinstance(exc, CertificateError):
@@ -515,9 +523,13 @@ def convert_excel(data: bytes, replace_signature: bool = False,
                 with pymupdf.open(Path(inputs[sheet_index]).with_suffix(".pdf")) as section:
                     if len(section) < 1 or len(doc) + len(section) > MAX_PAGES:
                         raise CertificateError(f"El certificado convertido debe tener entre 1 y {MAX_PAGES} páginas.")
-                    if len(records) > 1 and len(section) != len(layout.page_numbers):
+                    if layout.page_numbers and len(section) != len(layout.page_numbers):
                         raise CertificateError(f"La hoja {layout.sheet_name} se dividió en {len(section)} páginas al imprimir. Revisa su área, escala y saltos de impresión para conservar la numeración del certificado.")
                     fit_stationery_content(section, headers, added_letterhead=bool(selected or background))
+                    if layout.page_numbers:
+                        validate_page_labels(section, layout.page_numbers, numbered_total)
+                    if len(layout.page_numbers) > 1:
+                        validate_table_text(section)
                     background_xref = 0
                     for index, page in enumerate(section):
                         if background and selected is None:
