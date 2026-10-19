@@ -35,7 +35,7 @@ def certificate_layouts(data: bytes):
     expected = set(range(1, total + 1))
     found = {number for number, _ in pages}
     if found == expected:
-        return [primary]
+        return [replace(primary, page_numbers=tuple(sorted(found)))]
     numbered = [(min(found), replace(primary, page_numbers=tuple(sorted(found))))]
     targets = {rel.get("Id"): related("xl/workbook.xml", rel.get("Target", ""))
                for rel in xml(parts["xl/_rels/workbook.xml.rels"])
