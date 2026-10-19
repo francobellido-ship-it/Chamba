@@ -24,6 +24,7 @@ from app.excel_auxiliary import omit_auxiliary_errors
 from app.excel_print_width import background_width_overflows
 from app.excel_footers import FormatFooter, take_format_footers, footer_for_page, apply_format_footers, general_data_footer, entered_footer
 from app.pdf_images import compact_backgrounds
+from app.excel_rows import fit_table_headings
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -288,6 +289,7 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
     for row in sheet.findall("s:sheetData/s:row", NS):
         if row.get("ht"):
             row.set("customHeight", "1")
+    fitted_headings = fit_table_headings(sheet, xml(parts["xl/styles.xml"]), strings, cell_value, printed)
     for other in list(sheets):
         if other is not selected:
             sheets.remove(other)
@@ -327,6 +329,15 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         last_row = max(int(match[2]) for match in coords)
         name = selected.get("name").replace("'", "''")
         ET.SubElement(names, f"{{{S}}}definedName", name="_xlnm.Print_Area", localSheetId="0").text = f"'{name}'!$A$1:${last_col}${last_row}"
+        # An inferred range has no saved horizontal print placement. Centre it
+        # within the existing margins instead of leaving all spare width right.
+        options = sheet.find("s:printOptions", NS)
+        if options is None:
+            options = ET.Element(f"{{{S}}}printOptions")
+            page_margins = sheet.find("s:pageMargins", NS)
+            position = list(sheet).index(page_margins) if page_margins is not None else len(sheet)
+            sheet.insert(position, options)
+        options.set("horizontalCentered", "1")
     # The QCP zero-margin background is rendered as a single page image, not tiled.
     background = letterhead.data if letterhead else None
     footer = ""
@@ -393,6 +404,8 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
             if key.startswith("{"):
                 del setup.attrib[key]
     warnings = []
+    if fitted_headings:
+        warnings.append("Se ajustó la altura de los encabezados de tabla usando espacio vacío anterior, sin cambiar la paginación: " + ", ".join(fitted_headings) + ".")
     if layout.selection_reason:
         warnings.append(layout.selection_reason)
     if omitted_auxiliary_refs:

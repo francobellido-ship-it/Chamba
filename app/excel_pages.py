@@ -29,15 +29,16 @@ def fit_stationery_content(doc: pymupdf.Document, headers: tuple, *, added_lette
             raise CertificateError(f"El contenido de la página {index + 1} no cabe entre el encabezado y el pie. Revisa el área y los saltos de impresión del Excel.")
         y = max(102, top)
         y = min(y, page.rect.height - 44 - source.height * scale)
-        target = pymupdf.Rect(0, y, page.rect.width * scale, y + source.height * scale)
+        x = page.rect.width * (1 - scale) / 2
+        target = pymupdf.Rect(x, y, x + page.rect.width * scale, y + source.height * scale)
         # Transform the original vector stream directly. Nested page forms
         # interact poorly with image caches in some mobile PDF engines.
         page.wrap_contents()
         content = b"\n".join(doc.xref_stream(xref) for xref in page.get_contents())
         translate = page.rect.height * (1 - scale) + top * scale - y
         clip_y = page.rect.height - target.y1
-        prefix = (f"q\n0 {clip_y:.6f} {target.width:.6f} {target.height:.6f} re W n\n"
-                  f"{scale:.8f} 0 0 {scale:.8f} 0 {translate:.6f} cm\n").encode()
+        prefix = (f"q\n{x:.6f} {clip_y:.6f} {target.width:.6f} {target.height:.6f} re W n\n"
+                  f"{scale:.8f} 0 0 {scale:.8f} {x:.6f} {translate:.6f} cm\n").encode()
         replacement = doc.get_new_xref()
         doc.update_object(replacement, "<<>>")
         doc.update_stream(replacement, prefix + content + b"\nQ\n")

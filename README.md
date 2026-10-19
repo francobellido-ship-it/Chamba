@@ -67,6 +67,8 @@ Se usa LibreOffice para convertir una copia temporal. El fondo existente se cons
 
 La copia temporal contiene únicamente la hoja del certificado y los recursos que utiliza. Se eliminan conexiones, configuraciones de impresora y recursos ajenos; el PDF depura recursos sin uso, subconjunta fuentes y comprime su estructura. Cuando un JPEG repite su perfil ICC dentro de los metadatos, el PDF elimina esa copia redundante y conserva el espacio de color ICC declarado en el PDF, los datos comprimidos de la imagen, sus píxeles y resolución. Estas optimizaciones conservan texto vectorial y calidad original del fondo para impresión. Un JPEG de pocos MB puede expandirse a decenas de MB de píxeles en un lector PDF, especialmente si es CMYK; conservar la máxima resolución mantiene ese coste de visualización. La velocidad también depende del lector y del equipo. La interfaz muestra el tiempo transcurrido durante la conversión y el guardado. Cuando el código del nombre del archivo difiere del contenido, muestra un aviso y conserva el dato del documento.
 
+Cuando falta el área de impresión, se centra horizontalmente el rango inferido sin cambiar los márgenes guardados. Los encabezados de tabla sombreados con texto ajustado en Arial, Calibri o Carlito pueden ganar altura tomando solo espacio vacío inmediatamente anterior: se mantiene la altura total del bloque, los valores, las celdas combinadas y los saltos de página. No se aplica este ajuste si hay dibujos en la hoja, combinaciones verticales o espacio insuficiente; esos formatos requieren revisión visual. La reducción del contenido entre membrete y pie se realiza alrededor del centro horizontal de la página.
+
 Con el servidor arrancado, comprueba además una carga y descarga reales:
 
 ```sh
