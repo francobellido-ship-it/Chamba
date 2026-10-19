@@ -174,11 +174,11 @@ def compose_numbered_pages(workbook, sheet, sheet_name, styles, strings, value_o
     for top, bottom in segments:
         run = []
         def compact():
-            if len(run) < 3:
+            if not run:
                 return
             heights = [float(rows[n].get('ht', str(default_height))) for n in run]
             total = sum(heights)
-            if total <= 24:
+            if total <= 36:
                 return
             for number, height in zip(run, heights):
                 rows[number].set('ht', f'{height * 24 / total:.6f}')

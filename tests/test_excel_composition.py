@@ -156,6 +156,17 @@ def test_drawing_rows_and_original_image_bytes_survive_space_compaction():
         assert sheet.find(f"s:sheetData/s:row[@r='{number}']", NS).get('ht') == '15'
 
 
+def test_single_oversized_empty_row_is_compacted_without_removing_following_text():
+    book = load_workbook(BytesIO(numbered_certificate()))
+    book.active.row_dimensions[29].height = 200
+    book.active['A30'] = 'TEXTO DESPUES DE LA FILA MUY ALTA'
+    data = BytesIO()
+    book.save(data)
+    _, sheet = prepared(data.getvalue())
+    assert float(sheet.find("s:sheetData/s:row[@r='29']", NS).get('ht')) == 24
+    assert sheet.find("s:sheetData/s:row[@r='30']/s:c/s:is/s:t", NS).text == 'TEXTO DESPUES DE LA FILA MUY ALTA'
+
+
 @pytest.mark.parametrize('size,baseline', [(11, 110), (5, 109.5)])
 def test_clipped_or_tiny_table_text_fails_even_when_extraction_finds_it(size, baseline):
     with pymupdf.open() as doc:
