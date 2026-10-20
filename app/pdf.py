@@ -53,7 +53,7 @@ def signature_png(data: bytes | None) -> bytes | None:
 
 
 def _style(page: pymupdf.Page, area: pymupdf.Rect) -> tuple[float, tuple, str]:
-    for block in page.get_text("dict")["blocks"]:
+    for block in page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)["blocks"]:
         for line in block.get("lines", []):
             for span in line["spans"]:
                 if pymupdf.Rect(span["bbox"]).intersects(area):
@@ -70,7 +70,7 @@ def _replace_code(doc: pymupdf.Document, old_code: str, new_code: str) -> int:
     for page in doc:
         areas = page.search_for(old_code, quads=False)
         # Do not redact text spanning rotated lines: an explicit error preserves the original.
-        for block in page.get_text("dict")["blocks"]:
+        for block in page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)["blocks"]:
             for line in block.get("lines", []):
                 if any(pymupdf.Rect(line["bbox"]).intersects(area) for area in areas):
                     if abs(line["dir"][0] - 1) > 0.01 or abs(line["dir"][1]) > 0.01:
@@ -262,7 +262,7 @@ def _template_guides(page: pymupdf.Page) -> list[pymupdf.Rect]:
     """Read printed cells/textboxes, including a guide wrapped onto several lines."""
     guides = []
     pattern = re.compile(r"escane\w*\s+(?:este\s+)?qr|c[oó]digo\s+qr", re.I)
-    for block in page.get_text("dict")["blocks"]:
+    for block in page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)["blocks"]:
         lines = block.get("lines", [])
         text, spans = "", []
         for line in lines:
@@ -297,7 +297,7 @@ def _insert_template_stamp(page: pymupdf.Page, guide: pymupdf.Rect, qr: bytes,
         author = authors[0]
         signature_area = pymupdf.Rect(author.x0 - 82, author.y0 + 7.4, author.x0 - 4, author.y0 + 52.4)
         areas.append(signature_area)
-    occupied = [pymupdf.Rect(span["bbox"]) for block in page.get_text("dict")["blocks"]
+    occupied = [pymupdf.Rect(span["bbox"]) for block in page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)["blocks"]
                 for line in block.get("lines", []) for span in line["spans"]]
     # The full-page letterhead is expected beneath the certificate content.
     occupied.extend(pymupdf.Rect(info["bbox"]) for info in page.get_image_info(hashes=True)

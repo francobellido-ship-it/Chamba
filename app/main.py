@@ -8,6 +8,7 @@ import logging
 import multiprocessing
 import os
 from pathlib import Path
+from time import perf_counter
 import re
 from urllib.parse import quote, urlsplit
 from uuid import UUID, uuid4
@@ -195,9 +196,10 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
             "Content-Disposition": f"attachment; filename*=utf-8''{quote(info['filename'])}"})
 
     @app.post("/api/certificates", status_code=201)
-    async def create_certificate(excel: UploadFile | None = File(None), pdf: UploadFile | None = File(None), codigoCorrecto: str = Form(""),
+    async def create_certificate(response: Response, excel: UploadFile | None = File(None), pdf: UploadFile | None = File(None), codigoCorrecto: str = Form(""),
                                  firma: UploadFile | None = File(None), tipoCertificado: str = Form(""),
                                  codigoFormato: str = Form(''), versionFormato: str = Form('')):
+        started = perf_counter()
         if not store.ready:
             raise StorageError("Falta completar la conexión con Google Drive. Contacta al administrador.")
         if (excel is None) == (pdf is None):
@@ -219,6 +221,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                 raise HTTPException(422, str(exc)) from exc
         signature = await read_upload(firma, MAX_SIGNATURE_BYTES) if firma else None
         certificate_id = str(uuid4())
+        inspected = perf_counter()
         try:
             await asyncio.wait_for(app.state.processing.acquire(), timeout=0.1)
         except TimeoutError:
@@ -226,9 +229,11 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         try:
             publication = await asyncio.to_thread(store.allocate, certificate_id, origin)
             verification_url = publication.verification_url
+            allocated = perf_counter()
             result = await asyncio.get_running_loop().run_in_executor(
                 app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature,
                 tipoCertificado, codigoFormato, versionFormato)
+            processed = perf_counter()
             named_code = re.search(r"QCP-[0-9]{4}-[0-9]{4}", document.filename or "", re.I)
             if named_code and result.final_code and named_code[0].upper() != result.final_code:
                 result.warnings.append(f"El nombre del archivo dice {named_code[0].upper()}, pero el certificado contiene {result.final_code}. Se conservó el código del documento.")
@@ -245,6 +250,10 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                             backgroundPages=result.background_pages, formatPreserved=result.format_preserved,
                             sheetName=result.sheet_name, formatFooterVerified=result.format_footer_verified)
             await asyncio.to_thread(store.save, certificate_id, result.data, info, publication)
+            saved = perf_counter()
+            stages = (("inspect", inspected - started), ("allocate", allocated - inspected),
+                      ("process", processed - allocated), ("save", saved - processed))
+            response.headers["Server-Timing"] = ", ".join(f"{name};dur={duration * 1000:.1f}" for name, duration in stages)
         except StorageError:
             raise
         except CertificateError as exc:
