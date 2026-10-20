@@ -185,3 +185,36 @@ def test_incorrect_or_clipped_numbering_is_rejected_before_emission():
         doc.new_page().insert_text((40, 80), 'Pagina 1 d')
         with pytest.raises(CertificateError, match='numeración.*recortada'):
             validate_page_labels(doc, (1,), 3)
+
+
+def test_chart_fills_do_not_create_cells_that_reject_a_complete_chart_title():
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        # Filled chart panels have no stroked table borders. The title crosses
+        # a panel boundary and must remain readable without changing the PDF.
+        for left in [40, 150]:
+            for top in [100, 130]:
+                page.draw_rect(pymupdf.Rect(left, top, left + 110, top + 30),
+                               color=None, fill=(.95, .95, .95))
+        page.insert_text((125, 143), 'TITULO DEL GRAFICO', fontsize=11)
+        before = page.get_text()
+        validate_table_text(doc)
+        assert page.get_text() == before
+        assert 'TITULO DEL GRAFICO' in before
+
+
+def test_background_changes_inside_a_merged_label_are_not_cell_boundaries():
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        # A single merged label beside four data rows has two background fills,
+        # but only its outer rectangle is a real cell border.
+        page.draw_rect(pymupdf.Rect(40, 100, 70, 180), color=None, fill=(.8, .8, .8))
+        page.draw_rect(pymupdf.Rect(40, 130, 70, 180), color=None, fill=(.75, .75, .75))
+        page.draw_rect(pymupdf.Rect(40, 100, 70, 180))
+        for left in [70, 180]:
+            for top in [100, 120, 140, 160]:
+                page.draw_rect(pymupdf.Rect(left, top, left + 110, top + 20))
+        for letter, baseline in [('H', 129), ('I', 139), ('G', 149), ('H', 159)]:
+            page.insert_text((50, baseline), letter, fontsize=11)
+        validate_table_text(doc)
+        assert page.get_text().split() == ['H', 'I', 'G', 'H']
