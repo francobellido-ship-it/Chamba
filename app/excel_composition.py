@@ -19,9 +19,14 @@ def validate_page_labels(doc, numbers, total):
 
 
 def validate_table_text(doc):
-    """Extraction sees clipped glyphs too: require their boxes inside grid cells."""
+    """Check table text against stroked borders, never background fills.
+
+    Calc emits filled rectangles for charts and portions of merged cells.
+    Treating those fills as grid lines invents cells through chart titles and
+    stacked labels, rejecting readable templates that need no layout changes.
+    """
     for index, page in enumerate(doc):
-        cells = [pymupdf.Rect(cell) for table in page.find_tables().tables
+        cells = [pymupdf.Rect(cell) for table in page.find_tables(strategy="lines_strict").tables
                  for cell in table.cells if cell is not None]
         for block in page.get_text('dict')['blocks']:
             for line in block.get('lines', []):
