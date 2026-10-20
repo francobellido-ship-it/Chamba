@@ -29,27 +29,29 @@ def _without_jpeg_icc(data: bytes) -> bytes:
 
 
 def compact_backgrounds(doc: pymupdf.Document, digests: tuple[bytes, ...]) -> None:
-    seen = set()
-    for page in doc:
-        for image in page.get_image_info(hashes=True, xrefs=True):
-            xref = image["xref"]
-            if not xref or xref in seen or image["digest"] not in digests:
-                continue
-            seen.add(xref)
-            if doc.xref_get_key(xref, "Filter") != ("name", "/DCTDecode"):
-                continue
-            kind, value = doc.xref_get_key(xref, "ColorSpace")
-            if kind == "xref":
-                value = doc.xref_object(int(value.split()[0]))
-            # PDF's declared ICCBased colour space controls interpretation of
-            # the samples. Keep that profile, its Decode array, and JPEG data.
-            if not re.search(r"/ICCBased\s+\d+\s+0\s+R", value):
-                continue
-            original = doc.xref_stream_raw(xref)
-            compact = _without_jpeg_icc(original)
-            if compact != original:
-                doc.update_stream(xref, compact, compress=False)
-                doc.xref_set_key(xref, "Filter", "/DCTDecode")
-        # Each raster may decode to tens of MB. Release previews between pages;
-        # the PDF retains its original compressed pixels and colour profile.
+    if not digests:
+        return
+    # Resource references identify shared images without decoding every raster
+    # on every page. Only ICC JPEG candidates need their pixel digest checked.
+    xrefs = {image[0] for page in doc for image in page.get_images()}
+    for xref in sorted(xrefs):
+        if not xref or doc.xref_get_key(xref, "Filter") != ("name", "/DCTDecode"):
+            continue
+        kind, value = doc.xref_get_key(xref, "ColorSpace")
+        if kind == "xref":
+            value = doc.xref_object(int(value.split()[0]))
+        # PDF's declared ICCBased colour space controls interpretation of
+        # the samples. Keep that profile, its Decode array, and JPEG data.
+        if not re.search(r"/ICCBased\s+\d+\s+0\s+R", value):
+            continue
+        pixmap = pymupdf.Pixmap(doc, xref)
+        digest = pixmap.digest
+        del pixmap
         pymupdf.TOOLS.store_shrink(100)
+        if digest not in digests:
+            continue
+        original = doc.xref_stream_raw(xref)
+        compact = _without_jpeg_icc(original)
+        if compact != original:
+            doc.update_stream(xref, compact, compress=False)
+            doc.xref_set_key(xref, "Filter", "/DCTDecode")

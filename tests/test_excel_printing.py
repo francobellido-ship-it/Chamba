@@ -106,6 +106,8 @@ def test_page_sized_header_fills_each_page_without_scaling_cropping_or_pixel_cha
     with zipfile.ZipFile(BytesIO(prepared)) as source:
         root = ET.fromstring(source.read("xl/worksheets/sheet2.xml"))
         assert all("&G" not in (node.text or "") for node in root.find("s:headerFooter", NS))
+        assert root.find("s:legacyDrawingHF", NS) is None
+        assert "xl/media/header0.png" not in source.namelist()
     with pymupdf.open() as doc:
         for _ in range(2):
             page = doc.new_page(width=595.3, height=841.89)
@@ -240,3 +242,49 @@ def test_zero_margin_background_keeps_right_columns_without_enlarging_saved_page
         assert 'Página 1 de 1' in doc[0].get_text(clip=pymupdf.Rect(0,doc[0].rect.height-44,doc[0].rect.width,doc[0].rect.height))
         image = next(image for image in doc[0].get_image_info() if (image['width'], image['height']) == (248,351))
         assert max(abs(a-b) for a,b in zip(image['bbox'], doc[0].rect)) < .01
+
+
+def test_shared_jpeg_compaction_keeps_other_images_and_all_page_pixels():
+    profile = ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
+    def jpeg(color):
+        buffer = BytesIO()
+        Image.new('RGB', (248, 351), color).save(buffer, format='JPEG', icc_profile=profile)
+        return buffer.getvalue()
+    with pymupdf.open() as doc:
+        first = doc.new_page()
+        selected = first.insert_image(first.rect, stream=jpeg('#b6d7c5'))
+        other = first.insert_image(pymupdf.Rect(40, 100, 80, 150), stream=jpeg('#445577'))
+        for _ in range(2):
+            page = doc.new_page()
+            page.insert_image(page.rect, xref=selected)
+        digest = pymupdf.Pixmap(doc, selected).digest
+        streams = {xref: doc.xref_stream_raw(xref) for xref in (selected, other)}
+        before = [page.get_pixmap().samples for page in doc]
+        compact_backgrounds(doc, (digest,))
+        assert len(doc.xref_stream_raw(selected)) < len(streams[selected])
+        assert doc.xref_stream_raw(other) == streams[other]
+        assert [page.get_pixmap().samples for page in doc] == before
+        assert all(selected in [image[0] for image in page.get_images()] for page in doc)
+
+
+def test_active_footer_picture_survives_removing_full_page_header_marker():
+    def add_footer(parts):
+        path = 'xl/drawings/header.vml'
+        root = ET.fromstring(parts[path])
+        shape = ET.SubElement(root, '{urn:schemas-microsoft-com:vml}shape',
+                              id='RF', style='width:90pt;height:37.5pt')
+        ET.SubElement(shape, '{urn:schemas-microsoft-com:vml}imagedata',
+                      {'{urn:schemas-microsoft-com:office:office}relid': 'im1'})
+        parts[path] = ET.tostring(root)
+        path = 'xl/worksheets/sheet2.xml'
+        sheet = ET.fromstring(parts[path])
+        ET.SubElement(sheet.find('s:headerFooter', NS), f'{{{S}}}oddFooter').text = '&R&G'
+        parts[path] = ET.tostring(sheet)
+    data = rewrite(full_page_workbook(), add_footer)
+    prepared, *_ = _prepare_workbook(data, False)
+    with zipfile.ZipFile(BytesIO(prepared)) as archive:
+        sheet = ET.fromstring(archive.read('xl/worksheets/sheet2.xml'))
+        assert sheet.find('s:legacyDrawingHF', NS) is not None
+        assert sheet.find('s:headerFooter/s:oddFooter', NS).text == '&R&G'
+        assert 'xl/media/header1.png' in archive.namelist()
+    assert len(header_pictures(prepared)[0]) == 2

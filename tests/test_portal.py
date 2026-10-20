@@ -72,6 +72,9 @@ def test_html_versions_assets_and_changes_the_url_after_an_update(tmp_path, monk
 def test_upload_replace_and_download_end_to_end(client):
     response = upload(client, pdf_bytes(("QCP-2026-0001", "QCP-2026-0001")), codigoCorrecto="qcp-2026-0099")
     assert response.status_code == 201, response.text
+    timings = dict(re.findall(r"([a-z]+);dur=([0-9.]+)", response.headers["server-timing"]))
+    assert set(timings) == {"inspect", "allocate", "process", "save"}
+    assert all(float(duration) >= 0 for duration in timings.values())
     info = response.json()
     assert info["finalCode"] == "QCP-2026-0099"
     assert info["replacements"] == 2

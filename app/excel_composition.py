@@ -28,7 +28,7 @@ def validate_table_text(doc):
     for index, page in enumerate(doc):
         cells = [pymupdf.Rect(cell) for table in page.find_tables(strategy="lines_strict").tables
                  for cell in table.cells if cell is not None]
-        for block in page.get_text('dict')['blocks']:
+        for block in page.get_text('dict', flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)['blocks']:
             for line in block.get('lines', []):
                 for span in line['spans']:
                     if not span['text'].strip():

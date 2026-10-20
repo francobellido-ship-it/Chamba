@@ -13,7 +13,7 @@ from app.pdf import CertificateError
 def instruction_block(page, guide):
     block = pymupdf.Rect(guide)
     lines = [(pymupdf.Rect(line["bbox"]), "".join(span["text"] for span in line["spans"]).strip())
-             for item in page.get_text("dict")["blocks"] for line in item.get("lines", [])]
+             for item in page.get_text("dict", flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)["blocks"] for line in item.get("lines", [])]
     continuation = re.compile(r"^(?:para\s+(?:descarg|consult|verific)|(?:el\s+)?(?:certificado|documento)|con\s+(?:la\s+)?firma|electr[oó]nica|original\b|en\s+pdf|pdf\b)", re.I)
     for area, text in sorted(lines, key=lambda item: item[0].y0):
         if abs(area.x0 - guide.x0) > 4 or area.y0 < guide.y1 - 1:

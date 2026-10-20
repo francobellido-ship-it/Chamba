@@ -262,6 +262,20 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
                 element = header.find(f"s:{picture.variant}Header", NS)
                 if element is not None:
                     element.text = (element.text or "").replace("&G", "")
+    # The removed page-sized header is restored behind the PDF later. If no
+    # picture marker remains, its inactive VML and raster need not enter Calc.
+    # Keep active header/footer pictures and their original text untouched.
+    legacy = sheet.find("s:legacyDrawingHF", NS)
+    active_pictures = header is not None and any("&G" in (element.text or "") for element in header)
+    if headers[0] and legacy is not None and not active_pictures:
+        rel_id = legacy.get(f"{{{R}}}id")
+        sheet.remove(legacy)
+        rel_path = relationship_file(sheet_path)
+        relationships = xml(parts[rel_path])
+        for relation in list(relationships):
+            if relation.get("Id") == rel_id:
+                relationships.remove(relation)
+        parts[rel_path] = ET.tostring(relationships, encoding="utf-8", xml_declaration=True)
     strings = []
     if "xl/sharedStrings.xml" in parts:
         strings = ["".join(item.itertext()) for item in xml(parts["xl/sharedStrings.xml"])]
