@@ -566,7 +566,11 @@ def convert_excel(data: bytes, replace_signature: bool = False,
                 result = subprocess.run([
                     binary, f"-env:UserInstallation={(work / 'profile').as_uri()}",
                     "--headless", "--nologo", "--nodefault", "--nofirststartwizard", "--norestore",
-                    "--convert-to", "pdf:calc_pdf_Export", "--outdir", str(work), *paths,
+                    # Defaults differ across Office versions; keep source pixels.
+                    "--convert-to", ('pdf:calc_pdf_Export:'
+                                     '{"ReduceImageResolution":{"type":"boolean","value":"false"},'
+                                     '"UseLosslessCompression":{"type":"boolean","value":"true"}}'),
+                    "--outdir", str(work), *paths,
                 ], capture_output=True, timeout=remaining, env={**os.environ, "XDG_CACHE_HOME": str(work / "cache")})
             except subprocess.TimeoutExpired as exc:
                 raise CertificateError("La conversión del Excel tardó demasiado. Prueba con un libro más pequeño.") from exc
