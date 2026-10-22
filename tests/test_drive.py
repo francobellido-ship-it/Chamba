@@ -126,9 +126,11 @@ def test_drive_excel_survives_loss_of_local_storage_and_domain_change(tmp_path, 
         config = client.get("/api/config").json()
         assert config["storageBackend"] == "drive"
         assert config["requiresAccessKey"] is False
-        response = client.post("/api/certificates", files={
-            "excel": ("Certificado ficticio PERÚ.xlsx", workbook_bytes(), "application/octet-stream")},
-            data={"tipoCertificado": "acreditado"})
+        inspection = client.post("/api/excel/inspect", files={
+            "excel": ("Certificado ficticio PERÚ.xlsx", workbook_bytes(), "application/octet-stream")})
+        assert inspection.status_code == 200
+        response = client.post("/api/certificates", data={
+            "excelToken": inspection.json()["uploadToken"], "tipoCertificado": "acreditado"})
         assert response.status_code == 201, response.text
         info = response.json()
         assert info["sourceType"] == "xlsx"

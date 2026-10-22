@@ -301,7 +301,9 @@ $("certificate-form").addEventListener("submit", async (event) => {
       updateProgress();
       const timer = setInterval(updateProgress, 1000);
       const form = new FormData();
-      form.append(/\.xls[xm]$/i.test(file.name) ? "excel" : "pdf", file);
+      const uploadToken = layouts.get(file)?.data?.uploadToken;
+      if (uploadToken) form.append("excelToken", uploadToken);
+      else form.append(/\.xls[xm]$/i.test(file.name) ? "excel" : "pdf", file);
       form.append("codigoCorrecto", (codes.get(file) || "").trim());
       if (needsBackground(file)) form.append("tipoCertificado", certificateTypes.get(file));
       const footer = formatFooters.get(file);
@@ -311,7 +313,14 @@ $("certificate-form").addEventListener("submit", async (event) => {
       }
       if (signature) form.append("firma", signature);
       try {
-        const response = await fetch("/api/certificates", { method: "POST", body: form });
+        let response = await fetch("/api/certificates", { method: "POST", body: form });
+        if (response.status === 410 && uploadToken) {
+          // Eviction, expiry or a deployment can remove the private temporary copy.
+          // This response occurs before publication, so resending cannot duplicate it.
+          form.delete("excelToken");
+          form.append("excel", file);
+          response = await fetch("/api/certificates", { method: "POST", body: form });
+        }
         const result = await response.json();
         if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "La carga no es válida.");
         addResult(file, result, null);

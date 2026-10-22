@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 import asyncio
@@ -18,11 +18,12 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.pdf import CertificateError
+from app.pdf import CertificateError, normalized_code
 from app.documents import prepare_document
 from app.excel import inspect_excel
 from app.storage import DriveStorage, LocalStorage, StorageError, storage_from_environment
 from app.backgrounds import background_choices, require_background_type
+from app.uploads import InspectionCache
 
 STATIC = Path(__file__).parent / "static"
 MAX_PDF_BYTES = 15 * 1024 * 1024
@@ -118,15 +119,28 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         raise ValueError("PUBLIC_BASE_URL debe usar HTTPS para publicar el portal.")
     quota = int(os.environ.get("MAX_STORAGE_MB", "1024")) * 1024 * 1024
     store = certificate_storage or (LocalStorage(storage, quota) if storage_dir else storage_from_environment(storage, quota))
+    inspections = InspectionCache()
+
+    async def expire_inspections():
+        while True:
+            await asyncio.sleep(60)
+            await asyncio.to_thread(inspections.expire)
 
     @asynccontextmanager
     async def lifespan(app):
         await asyncio.to_thread(store.start)
         app.state.executor = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
         app.state.processing = asyncio.Semaphore(1)
-        yield
-        app.state.executor.shutdown(wait=True, cancel_futures=True)
-        await asyncio.to_thread(store.close)
+        cleanup = asyncio.create_task(expire_inspections())
+        try:
+            yield
+        finally:
+            cleanup.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup
+            app.state.executor.shutdown(wait=True, cancel_futures=True)
+            await asyncio.to_thread(inspections.close)
+            await asyncio.to_thread(store.close)
 
     app = FastAPI(title="Portal de certificados QCP", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
@@ -198,18 +212,30 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
     @app.post("/api/certificates", status_code=201)
     async def create_certificate(response: Response, excel: UploadFile | None = File(None), pdf: UploadFile | None = File(None), codigoCorrecto: str = Form(""),
                                  firma: UploadFile | None = File(None), tipoCertificado: str = Form(""),
-                                 codigoFormato: str = Form(''), versionFormato: str = Form('')):
+                                 codigoFormato: str = Form(''), versionFormato: str = Form(''),
+                                 excelToken: str = Form("")):
         started = perf_counter()
         if not store.ready:
             raise StorageError("Falta completar la conexión con Google Drive. Contacta al administrador.")
-        if (excel is None) == (pdf is None):
+        if sum((excel is not None, pdf is not None, bool(excelToken))) != 1:
             raise HTTPException(422, "Sube un Excel .xlsx, .xlsm o un PDF por solicitud.")
-        source_type = "xlsx" if excel else "pdf"
-        document = excel or pdf
-        filename = filename_safe(document.filename, source_type)
+        source_type = "xlsx" if excel or excelToken else "pdf"
+        if excelToken:
+            cached = await asyncio.to_thread(inspections.get, excelToken)
+            if cached is None:
+                raise HTTPException(410, "La copia temporal del Excel caducó. Vuelve a enviar el archivo.")
+            source_name, data = cached.filename, cached.data
+        else:
+            document = excel or pdf
+            source_name = document.filename
+            data = await read_upload(document, MAX_PDF_BYTES)
+        filename = filename_safe(source_name, source_type)
         if len(codigoCorrecto) > 40:
             raise HTTPException(422, "El código debe tener el formato QCP-0000-0000.")
-        data = await read_upload(document, MAX_PDF_BYTES)
+        try:
+            codigoCorrecto = normalized_code(codigoCorrecto)
+        except CertificateError as exc:
+            raise HTTPException(422, str(exc)) from exc
         if source_type == "xlsx":
             try:
                 from app.excel_footers import entered_footer
@@ -234,7 +260,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                 app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature,
                 tipoCertificado, codigoFormato, versionFormato)
             processed = perf_counter()
-            named_code = re.search(r"QCP-[0-9]{4}-[0-9]{4}", document.filename or "", re.I)
+            named_code = re.search(r"QCP-[0-9]{4}-[0-9]{4}", source_name or "", re.I)
             if named_code and result.final_code and named_code[0].upper() != result.final_code:
                 result.warnings.append(f"El nombre del archivo dice {named_code[0].upper()}, pero el certificado contiene {result.final_code}. Se conservó el código del documento.")
             info = {"id": certificate_id, "filename": filename, "sourceType": source_type,
@@ -250,6 +276,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                             backgroundPages=result.background_pages, formatPreserved=result.format_preserved,
                             sheetName=result.sheet_name, formatFooterVerified=result.format_footer_verified)
             await asyncio.to_thread(store.save, certificate_id, result.data, info, publication)
+            if excelToken:
+                await asyncio.to_thread(inspections.discard, excelToken)
             saved = perf_counter()
             stages = (("inspect", inspected - started), ("allocate", allocated - inspected),
                       ("process", processed - allocated), ("save", saved - processed))
@@ -281,6 +309,9 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         footer = await asyncio.to_thread(inspect_format_footer,data)
         if footer:
             result['formatFooter'] = {'code':footer.code,'version':footer.version}
+        token = await asyncio.to_thread(inspections.put, excel.filename, data)
+        if token:
+            result['uploadToken'] = token
         return result
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

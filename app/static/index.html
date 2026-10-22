@@ -19,23 +19,39 @@
       </a>
       <nav class="header-nav" aria-label="Navegación principal">
         <a class="nav-active" href="#preparar">Preparar certificados</a>
-        <a href="#guia">Cómo funciona</a>
+        <a href="#guia">Cómo funciona</a><a class="corporate-link" href="https://qcp.com.pe/" target="_blank" rel="noopener">Web de QCP <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></a>
       </nav>
-      <span class="header-tag">Portal de certificados</span>
+      <span class="header-tag"><span class="tag-dot" aria-hidden="true"></span>Portal de certificados</span>
     </div>
   </header>
   <main class="layout">
-    <section class="page-intro" aria-labelledby="welcome-title">
-      <div><span class="eyebrow">GESTIÓN DOCUMENTAL / QCP</span>
-        <h1 id="welcome-title">Certificados de calibración</h1>
-        <p>Prepara tus certificados en PDF con firma y QR de consulta.</p>
+    <section class="hero" aria-labelledby="welcome-title">
+      <div class="hero-art" aria-hidden="true"></div>
+      <div class="hero-content">
+        <span class="hero-eyebrow"><span aria-hidden="true"></span>QUALITY CONTROL PERÚ</span>
+        <h1 id="welcome-title">Tu certificado.<br><span>El respaldo QCP.</span></h1>
+        <p class="lead">Prepara tus certificados de calibración con el formato de tu plantilla, firma y QR de consulta. Listos para entregar y compartir.</p>
+        <a class="hero-cta" href="#preparar">Preparar certificados <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
       </div>
-      <a class="intro-help" href="#guia">Guía de uso <span aria-hidden="true">↓</span></a>
+      <div class="hero-caption"><span class="caption-line" aria-hidden="true"></span>QUALITY CONTROL PERÚ<span class="caption-detail">Laboratorio de calibración</span></div>
+      <span class="hero-index" aria-hidden="true">01 / QCP</span>
     </section>
+    <div class="feature-strip" aria-label="Características del portal">
+      <span><svg class="feature-mark" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>De Excel a PDF</span>
+      <span><svg class="feature-mark" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Tu formato, conservado</span>
+      <span><svg class="feature-mark" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM19 13v3m-6 3h3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Firma y consulta por QR</span>
+    </div>
     <div class="workspace">
+      <aside class="workspace-intro" aria-labelledby="workspace-title">
+        <span class="eyebrow">TU ESPACIO DE TRABAJO</span>
+        <h2 id="workspace-title">De tu plantilla<br> <span>al certificado.</span></h2>
+        <p>Carga tus archivos, revisa los detalles y obtén un PDF por certificado. Conservando el trabajo que ya hiciste en Excel.</p>
+        <div class="workflow-note"><span class="workflow-icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><strong>Tu plantilla sigue siendo tuya.</strong><p>Conservamos su información, fondo, encabezados y pie de página.</p></div></div>
+        <a class="text-link" href="#guia">Conoce el proceso <span aria-hidden="true">↓</span></a>
+      </aside>
       <section id="preparar" class="panel upload-panel" aria-labelledby="panel-title">
-        <div class="panel-heading"><div><span class="eyebrow">NUEVO LOTE</span><h2 id="panel-title">Preparar certificados</h2></div></div>
-        <p class="panel-description">Carga uno o varios archivos para preparar sus certificados.</p>
+        <div class="panel-heading"><div><span class="eyebrow">01 — NUEVO LOTE</span><h2 id="panel-title">Preparar certificados</h2></div><span class="pill">EXCEL → PDF</span></div>
+        <p class="panel-description">Selecciona tus archivos y prepara el lote en unos pasos.</p>
         <div id="local-notice" class="notice" hidden>Modo de prueba: los QR solo funcionan en este servidor. Al publicar el portal, usarán su dirección pública.</div>
         <div id="setup-notice" class="notice" role="status" hidden>La página está disponible para consulta. La preparación de certificados todavía no está habilitada; contacta al administrador.</div>
         <div id="load-error" class="notice error" role="alert" hidden></div>
@@ -43,8 +59,8 @@
           <label id="dropzone" class="dropzone" for="document-files">
             <input id="document-files" class="visually-hidden" type="file" accept=".xlsx,.xlsm,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.pdf,application/pdf" multiple aria-label="Seleccionar archivos Excel o PDF">
             <span class="upload-icon"><svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><path d="M16 21V6m-6 6 6-6 6 6M6 22v5h20v-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-            <strong>Arrastra tus archivos aquí</strong><span class="dropzone-hint">Archivos Excel o PDF, hasta 15 MB por archivo.</span>
-            <span class="select-files">Elegir archivos <span aria-hidden="true">＋</span></span>
+            <strong>Arrastra tus archivos aquí</strong><span class="dropzone-hint">Excel o PDF. Nosotros preparamos el resto.</span>
+            <span class="select-files">Seleccionar archivos <span aria-hidden="true">＋</span></span>
             <small>Formatos .xlsx y .xlsm · Usamos los valores guardados, sin ejecutar macros · También puedes cargar PDF</small>
             <small>Los problemas menores se muestran como avisos; los errores en datos esenciales requieren revisión.</small>
           </label>
@@ -62,19 +78,9 @@
         </form>
         <section id="results" class="results" aria-label="Resultados" hidden><div class="results-heading"><h3>Certificados del lote</h3><span>Descarga y comparte</span></div><div id="result-list"></div></section>
       </section>
-      <aside class="upload-help" aria-labelledby="help-title">
-        <h2 id="help-title">Antes de cargar</h2>
-        <dl>
-          <dt>Archivo guardado</dt><dd>Usa la versión final de tu Excel, con sus resultados calculados y guardados.</dd>
-          <dt>Formato de la plantilla</dt><dd>Conservamos los datos, el fondo, los encabezados y el pie del certificado.</dd>
-          <dt>Firma del responsable</dt><dd>Si ya está en el Excel, no necesitas volver a cargarla.</dd>
-          <dt>Un PDF por archivo</dt><dd>Cada certificado tendrá su propio enlace y QR de consulta.</dd>
-        </dl>
-        <p class="help-limit">Hasta 20 archivos por lote.<br>Formatos .xlsx, .xlsm y .pdf.</p>
-      </aside>
     </div>
     <section id="guia" class="guide" aria-labelledby="guide-title">
-      <div class="guide-heading"><div><span class="eyebrow">AYUDA</span><h2 id="guide-title">Guía de uso</h2></div><span>Preparación y consulta de certificados</span></div>
+      <div class="guide-heading"><div><span class="eyebrow">ASÍ DE SIMPLE</span><h2 id="guide-title">De tu archivo a su próximo destino.</h2></div><span>Tres pasos. Un mismo flujo.</span></div>
       <ol class="steps">
         <li><span class="step-number">01</span><div><h3>Selecciona tus archivos</h3><p>Usa tu plantilla con la hoja <strong>Certificado</strong> o <strong>CERTIFICADO QCP</strong>. Puedes cargar varios Excel a la vez.</p></div></li>
         <li><span class="step-number">02</span><div><h3>Conserva tu formato</h3><p>Mantenemos el fondo, encabezado y pie del Excel. Si no trae ninguno, elige acreditado o no acreditado. Revisa el código y la firma.</p></div></li>

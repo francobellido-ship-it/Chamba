@@ -291,7 +291,9 @@ def test_correct_sheet_selected_without_print_area_and_no_google_write(tmp_path)
     with TestClient(create_app(tmp_path, "https://example.com")) as client:
         check = client.post("/api/excel/inspect", files={"excel": ("test.xlsx", data)})
         assert check.status_code == 200
-        assert check.json() == {"sheetName": "CERTIFICADO QCP", "preserveFormat": False, "needsBackground": True}
+        inspection = check.json()
+        assert inspection.pop('uploadToken')
+        assert inspection == {"sheetName": "CERTIFICADO QCP", "preserveFormat": False, "needsBackground": True}
         assert not list(tmp_path.iterdir())
         response = client.post("/api/certificates", files={"excel": ("test.xlsx", data)}, data={"tipoCertificado": "no_acreditado"})
         assert response.status_code == 201, response.text
