@@ -9,7 +9,7 @@ import pytest
 from app.documents import prepare_document
 from app.excel import NS,S,_prepare_workbook,_read_parts
 from app.excel_footers import (FormatFooter, take_format_footers, general_data_footer,
-                               verify_format_footers, entered_footer)
+                               apply_format_footers, verify_format_footers, entered_footer)
 from app.main import create_app
 from app.pdf import CertificateError
 from test_excel import workbook_bytes,rewrite
@@ -73,6 +73,26 @@ def test_footer_verification_rejects_missing_or_incorrect_numbering():
         doc.new_page()
         with pytest.raises(CertificateError,match='verificar'):
             verify_format_footers(doc,[FormatFooter('F-GCA-10.04','00')])
+
+
+@pytest.mark.parametrize('footer', [FormatFooter('F-GCA-10.10','00'), None])
+def test_control_footer_is_a_compact_aligned_block_on_every_page(footer):
+    with pymupdf.open() as doc:
+        for width,height in [(595,842),(842,595),(595,842),(595,842)]:
+            doc.new_page(width=width,height=height)
+        apply_format_footers(doc,[footer]*len(doc))
+        for index,page in enumerate(doc):
+            labels = [f'Código: {footer.code}',f'Versión: {footer.version}'] if footer else []
+            labels.append(f'Página {index+1} de {len(doc)}')
+            boxes = [page.search_for(label)[0] for label in labels]
+            assert all(box.x1 == pytest.approx(page.rect.width-7,abs=.01) for box in boxes)
+            assert all(page.rect.contains(box) and box.y0 >= page.rect.height-44 for box in boxes)
+            assert page.rect.height-12 < boxes[-1].y1 < page.rect.height-5
+            pitches = [lower.y0-upper.y0 for upper,lower in zip(boxes,boxes[1:])]
+            assert all(7 <= pitch <= 10 for pitch in pitches)
+            assert len(set(round(pitch,2) for pitch in pitches)) <= 1
+            for upper,lower in zip(boxes,boxes[1:]):
+                assert upper.y1 < lower.y0
 
 
 def test_no_universal_code_or_version_is_invented():

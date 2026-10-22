@@ -49,15 +49,16 @@ def footer_for_page(settings, index, headers):
 
 
 def apply_format_footers(doc, footers):
+    font = pymupdf.Font('helv')
     for index, (page, footer) in enumerate(zip(doc, footers, strict=True)):
         lines = [f'Código: {footer.code}', f'Versión: {footer.version}'] if footer else []
-        lines = [(0, lines[0]), (1, lines[1])] if lines else []
-        lines.append((2, f'Página {index+1} de {len(doc)}'))
-        # Match the approved reference's small right-aligned three-line block.
-        # The lower band is reserved independently of the content transform.
-        for offset, text in lines:
-            width = pymupdf.get_text_length(text, fontname='helv', fontsize=5)
-            page.insert_text((page.rect.width-width-7, page.rect.height-(36,20,10)[offset]), text, fontsize=5)
+        lines.append(f'Página {index+1} de {len(doc)}')
+        # Keep one compact, evenly spaced block in the reserved lower band.
+        # Anchor the page number so missing format fields do not move it.
+        for offset, text in enumerate(lines):
+            width = font.text_length(text, fontsize=5)
+            baseline = page.rect.height-10-(len(lines)-1-offset)*8
+            page.insert_text((page.rect.width-width-7, baseline), text, fontsize=5)
     verify_format_footers(doc, footers)
 
 
