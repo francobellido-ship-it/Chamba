@@ -187,6 +187,18 @@ def test_incorrect_or_clipped_numbering_is_rejected_before_emission():
             validate_page_labels(doc, (1,), 3)
 
 
+def test_small_mathematical_index_beside_a_readable_base_letter_is_preserved():
+    with pymupdf.open() as doc:
+        page=doc.new_page()
+        for left in [40,150]:
+            for top in [100,120]:
+                page.draw_rect(pymupdf.Rect(left,top,left+110,top+20))
+        page.insert_text((45,113),'E',fontsize=8)
+        page.insert_text((50.4,113),'0',fontsize=5)
+        validate_table_text(doc)
+        assert 'E0' in doc[0].get_text().replace('\n','')
+
+
 def test_chart_fills_do_not_create_cells_that_reject_a_complete_chart_title():
     with pymupdf.open() as doc:
         page = doc.new_page()

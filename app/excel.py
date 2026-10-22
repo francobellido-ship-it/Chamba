@@ -25,7 +25,7 @@ from app.excel_auxiliary import omit_auxiliary_errors
 from app.excel_print_width import background_width_overflows
 from app.excel_footers import FormatFooter, take_format_footers, footer_for_page, apply_format_footers, general_data_footer, entered_footer
 from app.pdf_images import compact_backgrounds
-from app.excel_rows import fit_table_headings
+from app.excel_rows import fit_table_headings, fit_table_fonts, wrap_table_lines, fit_overflow_labels
 from app.excel_composition import compose_numbered_pages, drawing_row_ranges, validate_page_labels, validate_table_text, fit_manual_numbered_pages, validate_saved_labels
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -95,7 +95,8 @@ def _layout(parts: dict[str, bytes], sheet_index: int | None = None) -> ExcelLay
     for index, entry in enumerate(workbook.findall("s:sheets/s:sheet", NS)):
         name = entry.get("name", "")
         if (sheet_index is not None and index != sheet_index) or (sheet_index is None
-                and not re.fullmatch(r"certificado(?:\s+qcp)?", name.strip(), re.I)):
+                and (entry.get('state','visible') != 'visible'
+                     or not re.fullmatch(r"certificado(?:\s+qcp)?(?:\s*[0-9]+)?", name.strip(), re.I))):
             continue
         path = targets.get(entry.get(f"{{{R}}}id"))
         if not path or path not in parts:
@@ -106,10 +107,24 @@ def _layout(parts: dict[str, bytes], sheet_index: int | None = None) -> ExcelLay
         candidates.append((marker, index, name, path, sheet))
     if not candidates:
         raise CertificateError("El Excel debe tener una hoja llamada Certificado o CERTIFICADO QCP.")
-    marked = [candidate for candidate in candidates if candidate[0]]
-    if len(marked) > 1 or (not marked and len(candidates) > 1):
-        raise CertificateError("Hay varias hojas de certificado. Deja una sola hoja de certificado para identificar el formato correcto.")
-    _, index, name, path, sheet = marked[0] if marked else candidates[0]
+    plain = [candidate for candidate in candidates if re.fullmatch(r'certificado(?:\s+qcp)?',candidate[2].strip(),re.I)]
+    choices = plain or candidates
+    marked = [candidate for candidate in choices if candidate[0]]
+    qcp = [candidate for candidate in choices if re.fullmatch(r'certificado\s+qcp',candidate[2].strip(),re.I)]
+    if len(plain)>1 and qcp:
+        chosen=qcp[0]
+        reason=f'Se eligió {chosen[2]} como único formato principal del libro; se conservarán sus páginas continuadas.'
+    elif len(marked) == 1:
+        chosen = marked[0]
+    else:
+        first = [candidate for candidate in choices if any(re.fullmatch(r'p[aá]gina\s*1\s*de\s*[0-9]+',cell_value(cell,strings).strip(),re.I)
+                 for cell in candidate[4].findall('s:sheetData/s:row/s:c',NS))]
+        view = workbook.find('s:bookViews/s:workbookView',NS)
+        active = int(view.get('activeTab','0')) if view is not None else 0
+        chosen = (qcp or (first if len(first)==1 else []) or [candidate for candidate in choices if candidate[1]==active] or choices)[0]
+        if len(plain)>1:
+            reason = f'Se eligió {chosen[2]} como único formato principal del libro; se conservarán sus páginas continuadas.'
+    _, index, name, path, sheet = chosen
     picture = sheet.find("s:picture", NS)
     if picture is not None:
         rel_path = relationship_file(path)
@@ -305,7 +320,12 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
     for row in sheet.findall("s:sheetData/s:row", NS):
         if row.get("ht"):
             row.set("customHeight", "1")
-    fitted_headings = fit_table_headings(sheet, xml(parts["xl/styles.xml"]), strings, cell_value, printed)
+    heading_ranges = ()
+    heading_drawing = sheet.find('s:drawing',NS)
+    if heading_drawing is not None:
+        heading_relations = xml(parts.get(relationship_file(sheet_path),b'<Relationships/>'))
+        relation = next((rel for rel in heading_relations if rel.get('Id')==heading_drawing.get(f'{{{R}}}id')),None)
+        heading_ranges = drawing_row_ranges(xml(parts[related(sheet_path,relation.get('Target'))]),sheet) if relation is not None else None
     for other in list(sheets):
         if other is not selected:
             sheets.remove(other)
@@ -419,9 +439,19 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
         for key in list(setup.attrib):
             if key.startswith("{"):
                 del setup.attrib[key]
+    styles = xml(parts['xl/styles.xml'])
+    fitted_overflow = fit_overflow_labels(sheet,styles,strings,cell_value,printed,drawing_ranges=heading_ranges)
+    wrap_table_lines(sheet,styles,strings,cell_value,printed)
+    fitted_fonts = fit_table_fonts(sheet,styles,strings,cell_value,printed)
+    fitted_headings = fit_table_headings(sheet,styles,strings,cell_value,printed,drawing_ranges=heading_ranges)
+    parts['xl/styles.xml'] = ET.tostring(styles,encoding='utf-8',xml_declaration=True)
     warnings = []
+    if fitted_overflow:
+        warnings.append('Se ajustaron rótulos largos dentro de sus celdas vacías contiguas, sin mover datos ni filas.')
+    if fitted_fonts:
+        warnings.append('Se ajustó el tamaño de letra de las tablas para conservar su legibilidad con la escala de impresión guardada.')
     if fitted_headings:
-        warnings.append("Se ajustó la altura de los encabezados de tabla usando espacio vacío anterior, sin cambiar la paginación: " + ", ".join(fitted_headings) + ".")
+        warnings.append("Se ajustó la altura de los textos de tabla usando espacios vacíos cercanos, sin cambiar la paginación: " + ", ".join(fitted_headings) + ".")
     if layout.selection_reason:
         warnings.append(layout.selection_reason)
     if omitted_auxiliary_refs:
@@ -564,8 +594,7 @@ def convert_excel(data: bytes, replace_signature: bool = False,
                     fit_stationery_content(section, headers, added_letterhead=bool(selected or background))
                     if layout.page_numbers:
                         validate_page_labels(section, layout.page_numbers, numbered_total)
-                    if len(layout.page_numbers) > 1:
-                        validate_table_text(section)
+                    validate_table_text(section)
                     if sheet_index in repaired:
                         validate_saved_labels(section, Path(inputs[sheet_index]).read_bytes(), layout)
                     background_xref = 0

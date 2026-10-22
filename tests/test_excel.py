@@ -293,6 +293,7 @@ def test_correct_sheet_selected_without_print_area_and_no_google_write(tmp_path)
         assert check.status_code == 200
         inspection = check.json()
         assert inspection.pop('uploadToken')
+        assert 'CERTIFICADO QCP' in inspection.pop('selectionReason')
         assert inspection == {"sheetName": "CERTIFICADO QCP", "preserveFormat": False, "needsBackground": True}
         assert not list(tmp_path.iterdir())
         response = client.post("/api/certificates", files={"excel": ("test.xlsx", data)}, data={"tipoCertificado": "no_acreditado"})

@@ -49,7 +49,12 @@ def certificate_layouts(data: bytes):
             continue
         layout = _layout(parts, index)
         other_codes, other_pages = markers(layout)
-        if other_codes != codes or not other_pages or {count for _, count in other_pages} != {total}:
+        primary_series = re.fullmatch(r'(certificado(?:\s+qcp)?)\s*1',primary.sheet_name.strip(),re.I)
+        other_series = re.fullmatch(r'(certificado(?:\s+qcp)?)\s*([0-9]+)',layout.sheet_name.strip(),re.I)
+        continuation = (not other_codes and primary_series and other_series
+                        and primary_series[1].casefold()==other_series[1].casefold()
+                        and other_pages and int(other_series[2])==min(number for number,_ in other_pages))
+        if (other_codes != codes and not continuation) or not other_pages or {count for _, count in other_pages} != {total}:
             continue
         numbers = {number for number, _ in other_pages}
         if numbers & found or not numbers <= expected:

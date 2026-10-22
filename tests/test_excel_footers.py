@@ -86,9 +86,9 @@ def test_control_footer_is_a_compact_aligned_block_on_every_page(footer):
             labels = [f'Código: {footer.code}',f'Versión: {footer.version}'] if footer else []
             labels.append(f'Página {index+1} de {len(doc)}')
             boxes = [page.search_for(label)[0] for label in labels]
-            assert all(box.x1 == pytest.approx(page.rect.width-7,abs=.01) for box in boxes)
+            assert all(box.x1 == pytest.approx(page.rect.width-3,abs=.01) for box in boxes)
             assert all(page.rect.contains(box) and box.y0 >= page.rect.height-44 for box in boxes)
-            assert page.rect.height-25 < boxes[-1].y1 < page.rect.height-15
+            assert page.rect.height-8 < boxes[-1].y1 < page.rect.height-3
             rule = pymupdf.Rect(20,page.rect.height-27.2,page.rect.width-20,page.rect.height-26.8)
             assert not any(box.intersects(rule) for box in boxes)
             pitches = [lower.y0-upper.y0 for upper,lower in zip(boxes,boxes[1:])]

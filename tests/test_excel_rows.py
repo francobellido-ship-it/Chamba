@@ -6,12 +6,13 @@ import zipfile
 
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.drawing.image import Image as ExcelImage
 import pymupdf
 import pytest
 
 from app.excel import NS, _prepare_workbook, convert_excel
 from app.excel_pages import fit_stationery_content
-from test_excel import workbook_bytes
+from test_excel import workbook_bytes,image_bytes
 
 
 def heading_workbook(*, inferred_area=False, spacer=True, vertical_merge=False):
@@ -96,3 +97,40 @@ def test_fitting_to_letterhead_keeps_equal_side_margins():
         rect = doc[0].get_drawings()[0]['rect']
         assert rect.x0 == pytest.approx(page.rect.width - rect.x1, abs=.01)
         assert rect.y0 >= 102 and rect.y1 <= page.rect.height - 44
+
+
+@pytest.mark.parametrize('anchor,adjusted',[('J10',True),('J44',False)])
+def test_only_drawings_overlapping_the_changed_row_block_prevent_reflow(anchor,adjusted):
+    book=load_workbook(BytesIO(heading_workbook()))
+    book['Certificado'].add_image(ExcelImage(BytesIO(image_bytes((35,45),'blue'))),anchor)
+    buffer=BytesIO();book.save(buffer)
+    prepared=prepared_sheet(buffer.getvalue())
+    row=prepared.find("s:sheetData/s:row[@r='46']",NS)
+    assert (float(row.get('ht'))>14)==adjusted
+
+
+def test_text_reflow_borrows_empty_space_across_a_caption_without_changing_block_height():
+    book=load_workbook(BytesIO(heading_workbook(spacer=False)))
+    sheet=book['Certificado'];sheet['A45']='POSICION A';sheet['A45'].font=Font(name='Calibri',size=11,bold=True)
+    buffer=BytesIO();book.save(buffer)
+    prepared=prepared_sheet(buffer.getvalue())
+    rows={int(r.get('r')):r for r in prepared.findall('s:sheetData/s:row',NS)}
+    assert float(rows[46].get('ht'))>14
+    assert rows[45].find("s:c[@r='A45']/s:is/s:t",NS).text=='POSICION A'
+    assert sum(float(rows[n].get('ht'))for n in range(42,49))==pytest.approx(98)
+
+
+def test_overflow_label_keeps_its_end_and_does_not_enter_the_next_merged_column():
+    book=load_workbook(BytesIO(heading_workbook()))
+    sheet=book['Certificado']
+    sheet['D29']='0 mm a 60 mm (A); 0 mm a 20 mm (B); 0 mm a 20 mm (C)'
+    sheet['D29'].font=Font(name='Arial',size=11)
+    sheet.merge_cells('I27:L31');sheet['I27']='COLUMNA RESERVADA'
+    buffer=BytesIO();book.save(buffer);data=buffer.getvalue()
+    prepared=prepared_sheet(data)
+    assert 'D29:H29' in [m.get('ref')for m in prepared.findall('s:mergeCells/s:mergeCell',NS)]
+    assert 'I27:L31' in [m.get('ref')for m in prepared.findall('s:mergeCells/s:mergeCell',NS)]
+    with pymupdf.open(stream=convert_excel(data).pdf,filetype='pdf') as doc:
+        assert len(doc)==2
+        assert '0 mm a 20 mm (C)' in doc[0].get_text()
+        assert 'COLUMNA RESERVADA' in doc[0].get_text()
