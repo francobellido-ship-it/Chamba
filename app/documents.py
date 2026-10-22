@@ -1,7 +1,7 @@
 """Convert Excel certificates and share the existing PDF publication pipeline."""
 
 from app.excel import convert_excel, inspect_excel
-from app.pdf import CertificateError, PreparedPDF, prepare_pdf, signature_png
+from app.pdf import CertificateError, PreparedPDF, prepare_pdf, signature_png, normalized_code
 from app.backgrounds import load_letterhead, verify_letterhead
 from app.excel_footers import verify_format_footers
 import pymupdf
@@ -10,6 +10,7 @@ import pymupdf
 def prepare_document(data: bytes, source_type: str, requested_code: str,
                      verification_url: str, signature: bytes | None = None,
                      certificate_type: str = "", format_code: str = '', format_version: str = '') -> PreparedPDF:
+    requested_code = normalized_code(requested_code)
     if source_type == "xlsx":
         # Validate the optional replacement before starting the Office conversion.
         signature = signature_png(signature)

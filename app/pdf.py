@@ -18,6 +18,13 @@ class CertificateError(ValueError):
     pass
 
 
+def normalized_code(value: str) -> str:
+    value = value.strip().upper()
+    if value and not re.fullmatch(r"QCP-[0-9]{4}-[0-9]{4}", value):
+        raise CertificateError("El código debe tener el formato QCP-0000-0000.")
+    return value
+
+
 @dataclass
 class PreparedPDF:
     data: bytes
@@ -134,9 +141,7 @@ def _stamp_position(page: pymupdf.Page, with_signature: bool) -> pymupdf.Rect | 
 def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
                 signature: bytes | None = None, template: bool = False,
                 background_digests: tuple[bytes, ...] = ()) -> PreparedPDF:
-    requested_code = requested_code.strip().upper()
-    if requested_code and not re.fullmatch(r"QCP-[0-9]{4}-[0-9]{4}", requested_code):
-        raise CertificateError("El código debe tener el formato QCP-0000-0000.")
+    requested_code = normalized_code(requested_code)
     if not data.startswith(b"%PDF-"):
         raise CertificateError("El archivo no es un PDF válido.")
     try:
