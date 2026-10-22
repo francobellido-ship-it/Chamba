@@ -30,6 +30,11 @@ def validate_table_text(doc):
                  for cell in table.cells if cell is not None]
         for block in page.get_text('rawdict', flags=pymupdf.TEXTFLAGS_RAWDICT & ~pymupdf.TEXT_PRESERVE_IMAGES)['blocks']:
             for line in block.get('lines', []):
+                # Rich-text mathematical labels can contain smaller indices
+                # beside a readable base letter (E0, Ec). Check the base size
+                # of this line inside the same cell, and every glyph's bounds.
+                readable = [(pymupdf.Rect(s['bbox']), s['size']) for s in line['spans']
+                            if any(not c['c'].isspace() for c in s['chars'])]
                 for span in line['spans']:
                     characters = [char for char in span['chars'] if not char['c'].isspace()]
                     if not characters:
@@ -43,7 +48,9 @@ def validate_table_text(doc):
                     containing = [cell for cell in cells if cell.contains(center)]
                     if not containing:
                         continue
-                    if span['size'] < 6.5 or not any((cell + (-1, -1, 1, 1)).contains(box) for cell in containing):
+                    base_size = max((size for bounds, size in readable
+                                     if any(cell.contains((bounds.tl+bounds.br)/2) for cell in containing)), default=span['size'])
+                    if base_size < 6.5 or not any((cell + (-1, -1, 1, 1)).contains(box) for cell in containing):
                         raise CertificateError(f'Hay texto de tabla recortado o demasiado pequeño en la página {index + 1}. Revisa el tamaño de las celdas o distribuye ese cuadro en una página completa.')
 
 

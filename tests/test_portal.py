@@ -95,8 +95,9 @@ def test_upload_replace_and_download_end_to_end(client):
     assert hashlib.sha256(download.content).hexdigest() == info["sha256"]
     with pymupdf.open(stream=download.content, filetype="pdf") as doc:
         assert not doc.needs_pass
-        assert doc.metadata["encryption"]
-        assert not (doc.permissions & pymupdf.PDF_PERM_MODIFY)
+        assert not doc.metadata["encryption"]
+        assert doc.permissions & pymupdf.PDF_PERM_MODIFY
+        assert doc.permissions & pymupdf.PDF_PERM_COPY
         assert doc.permissions & pymupdf.PDF_PERM_PRINT
         for page in doc:
             text = page.get_text()

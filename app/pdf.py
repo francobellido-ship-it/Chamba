@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 from io import BytesIO
 import re
-import secrets
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 import pymupdf
@@ -237,10 +236,7 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         elif not template and len(stamped_pages) < original_pages:
             warnings.append("El QR y la firma opcional se insertaron solo en las páginas con espacio libre.")
         result = doc.tobytes(garbage=4, deflate=True, use_objstms=1,
-                             encryption=pymupdf.PDF_ENCRYPT_AES_256,
-                             owner_pw=secrets.token_hex(16), user_pw="",
-                             permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ |
-                             pymupdf.PDF_PERM_ACCESSIBILITY)
+                             encryption=pymupdf.PDF_ENCRYPT_NONE)
         if template:
             with pymupdf.open(stream=result,filetype='pdf') as final:
                 verify_template_qr(final, qr_area, verification_url, qr_buffer.getvalue(), guides[0] if guides else None)

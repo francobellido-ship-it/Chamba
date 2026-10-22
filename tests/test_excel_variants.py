@@ -47,12 +47,19 @@ def test_selects_only_the_variant_matching_the_saved_sensor_count(count):
     assert any(layout.selection_reason == warning for warning in warnings)
 
 
-@pytest.mark.parametrize("options,match", [({"count": 11}, "cantidad de sensores"),
-                                            ({"count": ""}, "cantidad de sensores"),
-                                            ({"named": False}, "CantSensores")])
+@pytest.mark.parametrize("options,match", [({"count": 11}, "cantidad de sensores")])
 def test_invalid_sensor_selector_is_actionable_and_never_guessed(options, match):
     with pytest.raises(CertificateError, match=match):
         inspect_excel(variants(**options))
+
+
+@pytest.mark.parametrize('options',[{'count':''},{'named':False}])
+def test_missing_sensor_decision_uses_one_saved_active_format(options):
+    data=variants(**options)
+    layouts=certificate_layouts(data)
+    assert len(layouts)==1
+    assert layouts[0].sheet_name=='7-Certificado_12S'
+    assert 'un solo formato' in layouts[0].selection_reason
 
 
 def test_inspection_reports_the_selection_reason_before_emission(tmp_path):
