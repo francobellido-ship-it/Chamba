@@ -39,22 +39,22 @@ def test_native_control_footer_is_kept_below_the_body_on_every_final_page():
         assert 'AVISO ORIGINAL' in hf and 'F-GCA-10.04' not in hf and '&P' not in hf
 
 
-def test_data_sheet_is_read_without_using_the_registers_own_form_identifier():
+def test_explicit_certificate_metadata_takes_priority_over_a_generic_register_heading():
     data=workbook_bytes()
     def add(parts):
         book=ET.fromstring(parts['xl/workbook.xml'])
         entry=book.find('s:sheets/s:sheet',NS);entry.set('name','Datos generales');entry.set('state','hidden')
         parts['xl/workbook.xml']=ET.tostring(book)
         sheet=ET.fromstring(parts['xl/worksheets/sheet1.xml']);cells=sheet.find('s:sheetData',NS)
-        for rownum,entries in [(4,[('A4','Código del formato del certificado:'),('B4','F-GCA-10.99')]),(5,[('A5','Versión:'),('B5','07')])]:
+        for rownum,entries in [(1,[('T1','CODIGO: F-GCA-07-04')]),(2,[('T2','VERSION: 01')]),(4,[('A4','Código del formato del certificado:'),('B4','F-GCA-10.99')]),(5,[('A5','Versión:'),('B5','07')])]:
             row=ET.SubElement(cells,f'{{{S}}}row',r=str(rownum))
             for ref,text in entries:
                 cell=ET.SubElement(row,f'{{{S}}}c',r=ref,t='inlineStr');ET.SubElement(ET.SubElement(cell,f'{{{S}}}is'),f'{{{S}}}t').text=text
         parts['xl/worksheets/sheet1.xml']=ET.tostring(sheet)
     source=rewrite(data,add)
     assert general_data_footer(_read_parts(source))==FormatFooter('F-GCA-10.99','07')
-    bad=rewrite(source,lambda p:p.update({'xl/worksheets/sheet1.xml':p['xl/worksheets/sheet1.xml'].replace(b'F-GCA-10.99',b'F-GCA-07.02')}))
-    assert general_data_footer(_read_parts(bad)) is None
+    alternate=rewrite(source,lambda p:p.update({'xl/worksheets/sheet1.xml':p['xl/worksheets/sheet1.xml'].replace(b'F-GCA-10.99',b'F-GCA-07.02')}))
+    assert general_data_footer(_read_parts(alternate))==FormatFooter('F-GCA-07.02','07')
 
 
 def test_missing_format_fields_continue_with_page_numbers_and_explicitly_supplied_fields(tmp_path):
@@ -98,3 +98,17 @@ def test_control_footer_is_a_compact_aligned_block_on_every_page(footer):
 def test_no_universal_code_or_version_is_invented():
     assert entered_footer('','') is None
     assert general_data_footer(_read_parts(workbook_bytes())) is None
+
+
+def test_hyphenated_format_code_is_kept_complete_and_other_footer_text_survives():
+    sheet = ET.fromstring(f'<worksheet xmlns="{S}"><headerFooter><oddFooter>&amp;LAVISO ORIGINAL&amp;RCódigo: F-GCA-07-04\nVersión: 01\nPágina &amp;P de &amp;N</oddFooter></headerFooter></worksheet>')
+    assert take_format_footers(sheet)=={'odd':FormatFooter('F-GCA-07-04','01')}
+    remaining = sheet.find('s:headerFooter/s:oddFooter',NS).text
+    assert 'AVISO ORIGINAL' in remaining
+    assert 'F-GCA' not in remaining and '-04' not in remaining and '&P' not in remaining
+
+
+@pytest.mark.parametrize('wrong_field',['LP-ALT0125-PC001','QCP-2026-0001','MAN-67'])
+def test_footer_does_not_accept_certificate_numbers_or_equipment_codes(wrong_field):
+    with pytest.raises(CertificateError,match='código y la versión del formato'):
+        entered_footer(wrong_field,'01')

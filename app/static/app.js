@@ -9,6 +9,8 @@ const layouts = new Map();
 const formatFooters = new Map();
 let inspectionQueue = Promise.resolve();
 let backgrounds = [];
+let certificateCodePattern = "";
+let maxCodeLength = 40;
 
 function needsBackground(file) {
   return /\.xls[xm]$/i.test(file.name) && layouts.get(file)?.data?.needsBackground === true;
@@ -102,33 +104,37 @@ function renderFiles() {
     }
     const label = document.createElement("label");
     label.className = "code-label";
-    label.textContent = "Código correcto · déjalo vacío para conservar el actual";
+    label.textContent = "Número del certificado (LP / QCP) · déjalo vacío para conservar el actual";
     const input = document.createElement("input");
     input.className = "code-input";
     input.id = `code-${index}`;
     input.type = "text";
-    input.maxLength = 13;
-    input.pattern = "[Qq][Cc][Pp]-[0-9]{4}-[0-9]{4}";
-    input.placeholder = "QCP-2026-0001";
+    input.maxLength = maxCodeLength;
+    input.pattern = certificateCodePattern;
+    input.placeholder = "QCP-2026-0001 o LP-ALT0125-PC001";
+    input.title = "QCP-0000-0000 o LP-ALT0125-PC001";
     input.value = codes.get(file) || "";
     input.disabled = busy;
-    input.addEventListener("input", () => codes.set(file, input.value));
+    input.addEventListener("input", () => {
+      input.value = input.value.toUpperCase();
+      codes.set(file, input.value);
+    });
     label.htmlFor = input.id;
     row.append(label, input);
     if (/\.xls[xm]$/i.test(file.name) && layouts.get(file)?.data) {
       const detected = layouts.get(file).data.formatFooter;
       const note = document.createElement("small");
       note.className = "background-hint";
-      note.textContent = detected ? `Pie del formato: ${detected.code} · Versión ${detected.version}. Numeración automática.` :
-        "No se encontró el código y la versión del formato. Puedes completarlos abajo; la numeración será automática.";
+      note.textContent = detected ? `Formato del certificado: ${detected.code} · Versión ${detected.version}. Numeración automática.` :
+        "Falta el código F-GCA y la versión del formato del certificado. Puedes completarlos abajo; son distintos del número LP/QCP y del código del equipo.";
       row.append(note);
       if (!detected) {
         const details = document.createElement("details");
         const summary = document.createElement("summary");
-        summary.textContent = "Pie del formato · completar si falta en el Excel";
+        summary.textContent = "Pie del certificado · código F-GCA y versión del formato";
         details.append(summary);
         const values = formatFooters.get(file) || { code: "", version: "" };
-        for (const [key, title, placeholder, limit] of [["code", "Código del formato", "F-GCA-…", 40], ["version", "Versión del formato", "La versión indicada por tu empresa", 16]]) {
+        for (const [key, title, placeholder, limit] of [["code", "Código del formato del certificado", "F-GCA-10.04", 40], ["version", "Versión del formato", "Por ejemplo 00 o 01, según tu formato", 16]]) {
           const footerLabel = document.createElement("label");
           footerLabel.className = "code-label";
           footerLabel.textContent = title;
@@ -356,6 +362,8 @@ async function initialize() {
     if (!response.ok) throw new Error("El portal no está disponible.");
     const config = await response.json();
     backgrounds = Array.isArray(config.certificateBackgrounds) ? config.certificateBackgrounds : [];
+    certificateCodePattern = config.certificateCodePattern;
+    maxCodeLength = config.maxCodeLength;
     $("local-notice").hidden = !config.localMode;
     ready = config.uploadsEnabled === true;
     $("setup-notice").hidden = ready;

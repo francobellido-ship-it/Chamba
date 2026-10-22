@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.pdf import CertificateError, normalized_code
+from app.pdf import CertificateError, normalized_code, CODE, CODE_PATTERN, MAX_CODE_LENGTH, CODE_ERROR
 from app.documents import prepare_document
 from app.excel import inspect_excel
 from app.storage import DriveStorage, LocalStorage, StorageError, storage_from_environment
@@ -179,6 +179,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         return {"requiresAccessKey": False, "uploadsEnabled": store.ready,
                 "localMode": is_local and store.backend == "local", "storageBackend": store.backend,
                 "maxPdfMB": 15, "maxExcelMB": 15, "maxSignatureMB": 2, "maxPages": 100,
+                "certificateCodePattern": CODE_PATTERN, "maxCodeLength": MAX_CODE_LENGTH,
                 "inputFormats": ["xlsx", "xlsm", "pdf"], "certificateBackgrounds": background_choices()}
 
     @app.get("/")
@@ -233,8 +234,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
             source_name = document.filename
             data = await read_upload(document, MAX_PDF_BYTES)
         filename = filename_safe(source_name, source_type)
-        if len(codigoCorrecto) > 40:
-            raise HTTPException(422, "El código debe tener el formato QCP-0000-0000.")
+        if len(codigoCorrecto) > MAX_CODE_LENGTH:
+            raise HTTPException(422, CODE_ERROR)
         try:
             codigoCorrecto = normalized_code(codigoCorrecto)
         except CertificateError as exc:
@@ -263,7 +264,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                 app.state.executor, prepare_document, data, source_type, codigoCorrecto, verification_url, signature,
                 tipoCertificado, codigoFormato, versionFormato)
             processed = perf_counter()
-            named_code = re.search(r"QCP-[0-9]{4}-[0-9]{4}", source_name or "", re.I)
+            named_code = CODE.search(source_name or "")
             if named_code and result.final_code and named_code[0].upper() != result.final_code:
                 result.warnings.append(f"El nombre del archivo dice {named_code[0].upper()}, pero el certificado contiene {result.final_code}. Se conservó el código del documento.")
             info = {"id": certificate_id, "filename": filename, "sourceType": source_type,
