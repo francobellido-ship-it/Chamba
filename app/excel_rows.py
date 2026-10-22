@@ -64,7 +64,8 @@ def fit_overflow_labels(sheet, styles, strings, value_of, printed, *, drawing_ra
                 continue
             font = fonts[int(style.get('fontId','0'))]
             name = font.find('s:name', NS); size = font.find('s:sz', NS)
-            if name is None or size is None or name.get('val','').casefold() not in {'arial','calibri','carlito','liberation sans'}:
+            if (font.find('s:vertAlign',NS) is not None or name is None or size is None
+                    or name.get('val','').casefold() not in {'arial','calibri','carlito','liberation sans'}):
                 continue
             metrics = pymupdf.Font('hebo' if font.find('s:b',NS) is not None else 'helv')
             needed = metrics.text_length(text, fontsize=float(size.get('val')))+6

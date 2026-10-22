@@ -23,7 +23,7 @@ def prepare_document(data: bytes, source_type: str, requested_code: str,
                              automatic_qr=bool(layout.preserve_format and layout.page_numbers))
         result.signature_included |= converted.embedded_signature
         result.warnings = converted.warnings + result.warnings
-        # Validate the final encrypted PDF after QR, signature and code processing.
+        # Validate the final PDF after QR, signature and code processing.
         if letterhead:
             with pymupdf.open(stream=result.data, filetype="pdf") as doc:
                 result.background_pages = verify_letterhead(doc, letterhead, converted.letterhead_pages)

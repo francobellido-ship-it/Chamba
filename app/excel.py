@@ -26,6 +26,7 @@ from app.excel_print_width import background_width_overflows
 from app.excel_footers import FormatFooter, take_format_footers, footer_for_page, apply_format_footers, general_data_footer, entered_footer
 from app.pdf_images import compact_backgrounds
 from app.excel_rows import fit_table_headings, fit_table_fonts, wrap_table_lines, fit_overflow_labels
+from app.excel_scripts import preserve_cell_scripts
 from app.excel_composition import compose_numbered_pages, drawing_row_ranges, validate_page_labels, validate_table_text, fit_manual_numbered_pages, validate_saved_labels
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -293,8 +294,11 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
                 relationships.remove(relation)
         parts[rel_path] = ET.tostring(relationships, encoding="utf-8", xml_declaration=True)
     strings = []
+    rich_strings = set()
     if "xl/sharedStrings.xml" in parts:
-        strings = ["".join(item.itertext()) for item in xml(parts["xl/sharedStrings.xml"])]
+        shared_strings = xml(parts["xl/sharedStrings.xml"])
+        strings = ["".join(item.itertext()) for item in shared_strings]
+        rich_strings = {index for index,item in enumerate(shared_strings) if item.find('s:r',NS) is not None}
     cells = sheet.findall("s:sheetData/s:row/s:c", NS)
     queries = sheet.find("s:queryTableParts", NS)
     if queries is not None:
@@ -440,12 +444,15 @@ def _prepare_workbook(data: bytes, replace_signature: bool,
             if key.startswith("{"):
                 del setup.attrib[key]
     styles = xml(parts['xl/styles.xml'])
+    fitted_scripts = preserve_cell_scripts(sheet,styles,strings,cell_value,printed,rich_strings=rich_strings)
     fitted_overflow = fit_overflow_labels(sheet,styles,strings,cell_value,printed,drawing_ranges=heading_ranges)
     wrap_table_lines(sheet,styles,strings,cell_value,printed)
     fitted_fonts = fit_table_fonts(sheet,styles,strings,cell_value,printed)
     fitted_headings = fit_table_headings(sheet,styles,strings,cell_value,printed,drawing_ranges=heading_ranges)
     parts['xl/styles.xml'] = ET.tostring(styles,encoding='utf-8',xml_declaration=True)
     warnings = []
+    if fitted_scripts:
+        warnings.append('Se conservaron los superíndices y subíndices guardados en el Excel sin recalcular las fórmulas.')
     if fitted_overflow:
         warnings.append('Se ajustaron rótulos largos dentro de sus celdas vacías contiguas, sin mover datos ni filas.')
     if fitted_fonts:
