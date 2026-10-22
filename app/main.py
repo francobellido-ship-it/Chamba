@@ -115,6 +115,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
         raise ValueError("PUBLIC_BASE_URL debe ser una URL http(s) sin ruta, credenciales, consulta ni fragmento.")
     is_local = local_url(origin)
+    revision = os.environ.get('RENDER_GIT_COMMIT', '')
     if not is_local and parsed.scheme != "https":
         raise ValueError("PUBLIC_BASE_URL debe usar HTTPS para publicar el portal.")
     quota = int(os.environ.get("MAX_STORAGE_MB", "1024")) * 1024 * 1024
@@ -156,6 +157,8 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
     async def security_headers(request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
+        if re.fullmatch(r'[0-9a-f]{40}', revision):
+            response.headers['X-App-Revision'] = revision
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; img-src 'self' data: blob:; script-src 'self'; "
