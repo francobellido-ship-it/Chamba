@@ -10,7 +10,21 @@ import pymupdf
 import qrcode
 import zxingcpp
 
-CODE = re.compile(r"QCP-\s*[0-9]{4}-[0-9]{4}", re.IGNORECASE)
+_CODE_PARTS = ((r"QCP", r"[0-9]{4}", r"[0-9]{4}"),
+               (r"LP", r"[A-Z]{2,12}[0-9]{4}", r"[A-Z]{1,8}[0-9]{3,6}"))
+
+
+def _code_pattern(separator):
+    return r"(?:" + "|".join(separator.join(parts) for parts in _CODE_PARTS) + ")"
+
+
+CODE_PATTERN = _code_pattern('-')
+MAX_CODE_LENGTH = 40
+CODE_ERROR = "El código debe tener el formato QCP-0000-0000 o LP-ALT0125-PC001."
+# Printed text may include spaces after a hyphen. Require complete identifiers,
+# so a longer instrument/reference number is never treated as a certificate.
+CODE = re.compile(r"(?<![A-Z0-9_-])" + _code_pattern(r'-\s*') + r"(?![A-Z0-9_-])",
+                  re.IGNORECASE | re.ASCII)
 MAX_PAGES = 100
 
 
@@ -19,10 +33,10 @@ class CertificateError(ValueError):
 
 
 def normalized_code(value: str) -> str:
-    value = value.strip().upper()
-    if value and not re.fullmatch(r"QCP-[0-9]{4}-[0-9]{4}", value):
-        raise CertificateError("El código debe tener el formato QCP-0000-0000.")
-    return value
+    value = value.strip()
+    if value and not re.fullmatch(CODE_PATTERN, value, re.IGNORECASE | re.ASCII):
+        raise CertificateError(CODE_ERROR)
+    return value.upper()
 
 
 @dataclass
