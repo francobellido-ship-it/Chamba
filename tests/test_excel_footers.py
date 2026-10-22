@@ -79,7 +79,8 @@ def test_footer_verification_rejects_missing_or_incorrect_numbering():
 def test_control_footer_is_a_compact_aligned_block_on_every_page(footer):
     with pymupdf.open() as doc:
         for width,height in [(595,842),(842,595),(595,842),(595,842)]:
-            doc.new_page(width=width,height=height)
+            page = doc.new_page(width=width,height=height)
+            page.draw_line((20,height-27),(width-20,height-27),width=.4)
         apply_format_footers(doc,[footer]*len(doc))
         for index,page in enumerate(doc):
             labels = [f'Código: {footer.code}',f'Versión: {footer.version}'] if footer else []
@@ -87,7 +88,9 @@ def test_control_footer_is_a_compact_aligned_block_on_every_page(footer):
             boxes = [page.search_for(label)[0] for label in labels]
             assert all(box.x1 == pytest.approx(page.rect.width-7,abs=.01) for box in boxes)
             assert all(page.rect.contains(box) and box.y0 >= page.rect.height-44 for box in boxes)
-            assert page.rect.height-12 < boxes[-1].y1 < page.rect.height-5
+            assert page.rect.height-25 < boxes[-1].y1 < page.rect.height-15
+            rule = pymupdf.Rect(20,page.rect.height-27.2,page.rect.width-20,page.rect.height-26.8)
+            assert not any(box.intersects(rule) for box in boxes)
             pitches = [lower.y0-upper.y0 for upper,lower in zip(boxes,boxes[1:])]
             assert all(7 <= pitch <= 10 for pitch in pitches)
             assert len(set(round(pitch,2) for pitch in pitches)) <= 1
