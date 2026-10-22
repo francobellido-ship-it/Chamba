@@ -55,10 +55,12 @@ def apply_format_footers(doc, footers):
         lines = [f'Código: {footer.code}', f'Versión: {footer.version}'] if footer else []
         lines.append(f'Página {index+1} de {len(doc)}')
         # Keep one compact, evenly spaced block in the reserved lower band.
+        # Leave the letterhead's rule (27 pt from the bottom) between rows,
+        # keeping it clear of the printed characters, including descenders.
         # Anchor the page number so missing format fields do not move it.
         for offset, text in enumerate(lines):
             width = font.text_length(text, fontsize=5)
-            baseline = page.rect.height-10-(len(lines)-1-offset)*8
+            baseline = page.rect.height-21-(len(lines)-1-offset)*8
             page.insert_text((page.rect.width-width-7, baseline), text, fontsize=5)
     verify_format_footers(doc, footers)
 
