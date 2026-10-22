@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from time import monotonic
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -25,7 +26,7 @@ from app.excel_print_width import background_width_overflows
 from app.excel_footers import FormatFooter, take_format_footers, footer_for_page, apply_format_footers, general_data_footer, entered_footer
 from app.pdf_images import compact_backgrounds
 from app.excel_rows import fit_table_headings
-from app.excel_composition import compose_numbered_pages, drawing_row_ranges, validate_page_labels, validate_table_text
+from app.excel_composition import compose_numbered_pages, drawing_row_ranges, validate_page_labels, validate_table_text, fit_manual_numbered_pages, validate_saved_labels
 
 S = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -519,16 +520,37 @@ def convert_excel(data: bytes, replace_signature: bool = False,
         # Drop decoded preview rasters before starting the Office subprocess.
         # Keep the compressed, original-resolution images in the print files.
         pymupdf.TOOLS.store_shrink(100)
-        try:
-            result = subprocess.run([
-                binary, f"-env:UserInstallation={(work / 'profile').as_uri()}",
-                "--headless", "--nologo", "--nodefault", "--nofirststartwizard", "--norestore",
-                "--convert-to", "pdf:calc_pdf_Export", "--outdir", str(work), *inputs,
-            ], capture_output=True, timeout=120, env={**os.environ, "XDG_CACHE_HOME": str(work / "cache")})
-        except subprocess.TimeoutExpired as exc:
-            raise CertificateError("La conversión del Excel tardó demasiado. Prueba con un libro más pequeño.") from exc
-        if result.returncode or any(not Path(path).with_suffix(".pdf").is_file() for path in inputs):
-            raise CertificateError("LibreOffice no pudo convertir este Excel. Revisa su formato y área de impresión.")
+        deadline = monotonic() + 120
+        def export(paths):
+            remaining = deadline - monotonic()
+            try:
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(binary, 120)
+                result = subprocess.run([
+                    binary, f"-env:UserInstallation={(work / 'profile').as_uri()}",
+                    "--headless", "--nologo", "--nodefault", "--nofirststartwizard", "--norestore",
+                    "--convert-to", "pdf:calc_pdf_Export", "--outdir", str(work), *paths,
+                ], capture_output=True, timeout=remaining, env={**os.environ, "XDG_CACHE_HOME": str(work / "cache")})
+            except subprocess.TimeoutExpired as exc:
+                raise CertificateError("La conversión del Excel tardó demasiado. Prueba con un libro más pequeño.") from exc
+            if result.returncode or any(not Path(path).with_suffix(".pdf").is_file() for path in paths):
+                raise CertificateError("LibreOffice no pudo convertir este Excel. Revisa su formato y área de impresión.")
+        export(inputs)
+        repaired, retry = set(), []
+        for index, record in enumerate(records):
+            layout = record[0]
+            with pymupdf.open(Path(inputs[index]).with_suffix('.pdf')) as section:
+                mismatch = layout.page_numbers and len(section) != len(layout.page_numbers)
+            if mismatch:
+                workbook = fit_manual_numbered_pages(record[1], layout)
+                if workbook is not None:
+                    Path(inputs[index]).write_bytes(workbook)
+                    Path(inputs[index]).with_suffix('.pdf').unlink()
+                    retry.append(inputs[index])
+                    repaired.add(index)
+        if retry:
+            export(retry)
+            warnings.append('Se ajustó la impresión a los bloques de páginas definidos por los saltos guardados, conservando sus datos, firma e imágenes.')
         with pymupdf.open() as doc:
             background_digests, letterhead_pages = [], []
             format_footers = []
@@ -544,6 +566,8 @@ def convert_excel(data: bytes, replace_signature: bool = False,
                         validate_page_labels(section, layout.page_numbers, numbered_total)
                     if len(layout.page_numbers) > 1:
                         validate_table_text(section)
+                    if sheet_index in repaired:
+                        validate_saved_labels(section, Path(inputs[sheet_index]).read_bytes(), layout)
                     background_xref = 0
                     for index, page in enumerate(section):
                         if background and selected is None:

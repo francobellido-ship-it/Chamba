@@ -8,6 +8,33 @@ import pymupdf
 from app.excel_ranges import NS
 
 
+def fit_single_line_labels(sheet, styles):
+    """Fit merged one-line labels without changing their data or row geometry."""
+    from copy import deepcopy
+    formats = styles.find('s:cellXfs', NS)
+    borders = styles.findall('s:borders/s:border', NS)
+    merged = {merge.get('ref').split(':')[0] for merge in sheet.findall('s:mergeCells/s:mergeCell', NS)
+              if len({re.sub(r'[A-Z]+', '', ref) for ref in merge.get('ref').split(':')}) == 1}
+    replacements = {}
+    for cell in sheet.findall('s:sheetData/s:row/s:c', NS):
+        if cell.get('r') not in merged or cell.get('t') not in {'s', 'str', 'inlineStr'}:
+            continue
+        index = int(cell.get('s', '0'))
+        style = formats[index]
+        alignment = style.find('s:alignment', NS)
+        if (alignment is None or alignment.get('wrapText') in {'1', 'true'}
+                or alignment.get('textRotation', '0') != '0' or alignment.get('shrinkToFit') in {'1', 'true'}
+                or not any(edge.get('style') for edge in borders[int(style.get('borderId', '0'))])):
+            continue
+        if index not in replacements:
+            copy = deepcopy(style)
+            copy.find('s:alignment', NS).set('shrinkToFit', '1')
+            replacements[index] = len(formats)
+            formats.append(copy)
+        cell.set('s', str(replacements[index]))
+    formats.set('count', str(len(formats)))
+
+
 def _coordinate(reference):
     match = re.fullmatch(r"([A-Z]+)([0-9]+)", reference)
     column = 0

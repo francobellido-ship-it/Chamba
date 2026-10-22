@@ -19,7 +19,8 @@ def prepare_document(data: bytes, source_type: str, requested_code: str,
         converted = convert_excel(data, replace_signature=bool(signature), letterhead=letterhead,
                                   format_code=format_code, format_version=format_version)
         result = prepare_pdf(converted.pdf, requested_code, verification_url, signature, template=True,
-                             background_digests=converted.background_digests)
+                             background_digests=converted.background_digests,
+                             automatic_qr=bool(layout.preserve_format and layout.page_numbers))
         result.signature_included |= converted.embedded_signature
         result.warnings = converted.warnings + result.warnings
         # Validate the final encrypted PDF after QR, signature and code processing.

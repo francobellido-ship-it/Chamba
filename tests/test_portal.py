@@ -47,6 +47,13 @@ def test_home_config_and_health(client):
     assert config["requiresAccessKey"] is False
 
 
+def test_render_revision_identifies_the_deployed_build(tmp_path, monkeypatch):
+    revision = 'a' * 40
+    monkeypatch.setenv('RENDER_GIT_COMMIT', revision)
+    with TestClient(create_app(tmp_path)) as client:
+        assert client.get('/healthz').headers['x-app-revision'] == revision
+
+
 def test_html_versions_assets_and_changes_the_url_after_an_update(tmp_path, monkeypatch):
     from app import main
     static = tmp_path / "static"

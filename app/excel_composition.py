@@ -28,18 +28,131 @@ def validate_table_text(doc):
     for index, page in enumerate(doc):
         cells = [pymupdf.Rect(cell) for table in page.find_tables(strategy="lines_strict").tables
                  for cell in table.cells if cell is not None]
-        for block in page.get_text('dict', flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)['blocks']:
+        for block in page.get_text('rawdict', flags=pymupdf.TEXTFLAGS_RAWDICT & ~pymupdf.TEXT_PRESERVE_IMAGES)['blocks']:
             for line in block.get('lines', []):
                 for span in line['spans']:
-                    if not span['text'].strip():
+                    characters = [char for char in span['chars'] if not char['c'].isspace()]
+                    if not characters:
                         continue
-                    box = pymupdf.Rect(span['bbox'])
+                    # Spaces can extend past a border while every printed letter
+                    # fits. Check the actual characters without relaxing borders.
+                    box = pymupdf.Rect(characters[0]['bbox'])
+                    for char in characters[1:]:
+                        box |= pymupdf.Rect(char['bbox'])
                     center = (box.tl + box.br) / 2
                     containing = [cell for cell in cells if cell.contains(center)]
                     if not containing:
                         continue
                     if span['size'] < 6.5 or not any((cell + (-1, -1, 1, 1)).contains(box) for cell in containing):
                         raise CertificateError(f'Hay texto de tabla recortado o demasiado pequeño en la página {index + 1}. Revisa el tamaño de las celdas o distribuye ese cuadro en una página completa.')
+
+
+def fit_manual_numbered_pages(data, layout):
+    """Retry a mismatched export using the workbook's own verified page blocks.
+
+    This is only used after Calc exported the wrong page count. Each saved
+    manual block must contain exactly its expected page label near the top,
+    with no merged cell or drawing crossing a break. No rows or values move.
+    """
+    from app.excel import _read_parts, xml, cell_value, relationship_file, related, R
+    from app.excel_package import print_package
+    from xml.etree import ElementTree as ET
+    parts = _read_parts(data)
+    workbook, sheet = xml(parts['xl/workbook.xml']), xml(parts[layout.sheet_path])
+    area = print_names(workbook, 0).get('Print_Area')
+    bounds = _bounds(area.text or '', layout.sheet_name) if area is not None else None
+    if not bounds or len(bounds) != 1 or len(layout.page_numbers) < 2:
+        return None
+    left, first, right, last = bounds[0]
+    breaks = sheet.findall('s:rowBreaks/s:brk', NS)
+    if (len(breaks) + 1 != len(layout.page_numbers) or sheet.find('s:colBreaks/s:brk', NS) is not None
+            or print_names(workbook, 0).get('Print_Titles') is not None):
+        return None
+    if any(brk.get('man') not in {'1', 'true'} or int(brk.get('min', '0')) > left - 1
+           or int(brk.get('max', '16383')) < right - 1 for brk in breaks):
+        return None
+    cuts = sorted(int(brk.get('id')) for brk in breaks)
+    if len(set(cuts)) != len(cuts) or any(not first <= cut < last for cut in cuts):
+        return None
+    segments = list(zip([first] + [cut + 1 for cut in cuts], cuts + [last]))
+    strings = [''.join(item.itertext()) for item in xml(parts['xl/sharedStrings.xml'])] if 'xl/sharedStrings.xml' in parts else []
+    printed = printed_cell_checker(workbook, sheet, 0, layout.sheet_name)
+    labels = []
+    for cell in sheet.findall('s:sheetData/s:row/s:c', NS):
+        if printed(cell.get('r', '')):
+            match = PAGE.fullmatch(cell_value(cell, strings).strip())
+            if match:
+                position = _cell(cell.get('r'))
+                if position:
+                    labels.append((position[1], int(match[1]), int(match[2])))
+    if len(labels) != len(segments) or len({total for _, _, total in labels}) != 1:
+        return None
+    for (top, bottom), expected in zip(segments, layout.page_numbers, strict=True):
+        block = [(row, number) for row, number, _ in labels if top <= row <= bottom]
+        if len(block) != 1 or block[0][1] != expected or block[0][0] > top + 12:
+            return None
+    for merge in sheet.findall('s:mergeCells/s:mergeCell', NS):
+        a, b = (_cell(ref) for ref in (merge.get('ref').split(':')[0], merge.get('ref').split(':')[-1]))
+        if not a or not b:
+            return None
+        if b[0] >= left and a[0] <= right and any(a[1] <= cut < b[1] for cut in cuts):
+            return None
+    drawing = sheet.find('s:drawing', NS)
+    if drawing is not None:
+        relationships = xml(parts[relationship_file(layout.sheet_path)])
+        relation = next((rel for rel in relationships if rel.get('Id') == drawing.get(f'{{{R}}}id')), None)
+        if relation is None:
+            return None
+        ranges = drawing_row_ranges(xml(parts[related(layout.sheet_path, relation.get('Target'))]), sheet)
+        if ranges is None or any(b >= left and a <= right and any(top <= cut < bottom for cut in cuts)
+                                 for a, top, b, bottom in ranges):
+            return None
+    name = layout.sheet_name.replace("'", "''")
+    area.text = ','.join(f"'{name}'!${_letters(left)}${top}:${_letters(right)}${bottom}" for top, bottom in segments)
+    setup = sheet.find('s:pageSetup', NS)
+    if setup is None:
+        setup = ET.SubElement(sheet, f'{{{S}}}pageSetup')
+    setup.set('fitToWidth', '1')
+    setup.set('fitToHeight', '1')
+    properties = sheet.find('s:sheetPr', NS)
+    if properties is None:
+        properties = ET.Element(f'{{{S}}}sheetPr')
+        sheet.insert(0, properties)
+    page = properties.find('s:pageSetUpPr', NS)
+    if page is None:
+        page = ET.SubElement(properties, f'{{{S}}}pageSetUpPr')
+    page.set('fitToPage', '1')
+    sheet.remove(sheet.find('s:rowBreaks', NS))
+    # Let Calc fit long single-line merged labels within their original cells.
+    # Their values, fonts, row heights and drawing anchors stay in place.
+    from app.excel_rows import fit_single_line_labels
+    styles = xml(parts['xl/styles.xml'])
+    fit_single_line_labels(sheet, styles)
+    parts['xl/styles.xml'] = ET.tostring(styles, encoding='utf-8', xml_declaration=True)
+    parts['xl/workbook.xml'] = ET.tostring(workbook, encoding='utf-8', xml_declaration=True)
+    parts[layout.sheet_path] = ET.tostring(sheet, encoding='utf-8', xml_declaration=True)
+    selected = workbook.find('s:sheets/s:sheet', NS)
+    return print_package(parts, selected.get(f'{{{R}}}id'))
+
+
+def validate_saved_labels(doc, data, layout):
+    """A repaired export must retain all printed literal labels, including repeats."""
+    from collections import Counter
+    import unicodedata
+    from app.excel import _read_parts, xml, cell_value
+    parts = _read_parts(data)
+    workbook, sheet = xml(parts['xl/workbook.xml']), xml(parts[layout.sheet_path])
+    strings = [''.join(item.itertext()) for item in xml(parts['xl/sharedStrings.xml'])] if 'xl/sharedStrings.xml' in parts else []
+    printed = printed_cell_checker(workbook, sheet, 0, layout.sheet_name)
+    def normalize(value):
+        return re.sub(r'\s+', '', unicodedata.normalize('NFKC', value))
+    expected = Counter(normalize(cell_value(cell, strings))
+                       for cell in sheet.findall('s:sheetData/s:row/s:c', NS)
+                       if cell.get('t') in {'s', 'str', 'inlineStr'} and printed(cell.get('r', ''))
+                       and any(char.isalpha() for char in cell_value(cell, strings)))
+    text = normalize('\n'.join(page.get_text() for page in doc))
+    if any(text.count(value) < count for value, count in expected.items()):
+        raise CertificateError('La impresión no conservó completo un texto de la plantilla. No se emitió el certificado recortado.')
 
 
 def drawing_row_ranges(drawing, sheet):
