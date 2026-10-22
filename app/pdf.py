@@ -140,7 +140,7 @@ def _stamp_position(page: pymupdf.Page, with_signature: bool) -> pymupdf.Rect | 
 
 def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
                 signature: bytes | None = None, template: bool = False,
-                background_digests: tuple[bytes, ...] = ()) -> PreparedPDF:
+                background_digests: tuple[bytes, ...] = (), automatic_qr: bool = False) -> PreparedPDF:
     requested_code = normalized_code(requested_code)
     if not data.startswith(b"%PDF-"):
         raise CertificateError("El archivo no es un PDF válido.")
@@ -194,8 +194,10 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
             from app.pdf_qr import verify_template_qr
             guides = _template_guides(doc[0])
             if not guides:
-                qr_area = _replace_existing_template_qr(doc, qr_buffer.getvalue(), verification_url, signature)
-                warnings.append("Se actualizó el QR existente para enlazar al nuevo PDF; se conservó su ubicación.")
+                qr_area, inserted = _replace_existing_template_qr(doc, qr_buffer.getvalue(), verification_url, signature,
+                                                                 background_digests, automatic_qr)
+                warnings.append("La plantilla no incluía QR; se añadió en un espacio libre de la primera página, conservando su contenido y paginación." if inserted else
+                                "Se actualizó el QR existente para enlazar al nuevo PDF; se conservó su ubicación.")
             elif len(guides) != 1:
                 raise CertificateError("Se detectaron varios espacios para el QR en la primera página. Deja una sola indicación para ubicarlo.")
             else:
@@ -232,9 +234,9 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
 
 
 def _replace_existing_template_qr(doc: pymupdf.Document, qr: bytes, url: str,
-                                 signature: bytes | None) -> pymupdf.Rect:
+                                 signature: bytes | None, background_digests=(), automatic=False) -> tuple[pymupdf.Rect, bool]:
     """Recognize a saved Drive QR instead of guessing a blank slot in a template."""
-    slots = []
+    slots, other_qr = [], False
     page = doc[0]
     for info in page.get_image_info(xrefs=True):
         area = pymupdf.Rect(info["bbox"])
@@ -245,6 +247,11 @@ def _replace_existing_template_qr(doc: pymupdf.Document, qr: bytes, url: str,
         decoded = zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormat.QRCode)
         if len(decoded) == 1 and re.match(r"https://drive\.google\.com/file/d/[A-Za-z0-9_-]+/view(?:[?#]|$)", decoded[0].text):
             slots.append((area, info["xref"]))
+        elif decoded:
+            other_qr = True
+    if not slots and not other_qr and automatic and background_digests and not signature:
+        from app.pdf_qr import insert_automatic_qr
+        return insert_automatic_qr(page, qr, url, background_digests), True
     if len(slots) != 1:
         raise CertificateError("No se pudo identificar el espacio para el QR de forma única en la primera página. Usa una indicación Escanee este QR o conserva un QR de Drive legible en su posición.")
     area, xref = slots[0]
@@ -260,7 +267,7 @@ def _replace_existing_template_qr(doc: pymupdf.Document, qr: bytes, url: str,
     page.insert_link({"kind": pymupdf.LINK_URI, "from": target, "uri": url})
     if signature:
         raise CertificateError("Esta plantilla tiene un QR existente y un bloque de firma diferente. Conserva la firma del Excel o usa la plantilla con Autorizado y firmado por para reemplazarla.")
-    return target
+    return target, False
 
 
 def _template_guides(page: pymupdf.Page) -> list[pymupdf.Rect]:
