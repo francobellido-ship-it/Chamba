@@ -21,6 +21,18 @@ from test_excel import workbook_bytes, rewrite, image_bytes
 from test_excel_format import header_workbook
 
 
+def test_small_printed_signature_keeps_its_full_native_pixel_resolution():
+    from app.excel import convert_excel
+    original=image_bytes((1000,450),'blue')
+    data=rewrite(workbook_bytes(),lambda parts:parts.update({'xl/media/image2.png':original}))
+    with pymupdf.open(stream=convert_excel(data).pdf,filetype='pdf')as doc:
+        images=[image for page in doc for image in page.get_image_info(xrefs=True)
+                if (image['width'],image['height'])==(1000,450)]
+        assert len(images)==1
+        actual=Image.open(BytesIO(doc.extract_image(images[0]['xref'])['image'])).convert('RGB')
+        assert actual.tobytes()==Image.open(BytesIO(original)).convert('RGB').tobytes()
+
+
 @pytest.mark.parametrize("hidden", [True, False])
 def test_hidden_formula_errors_are_not_printed_and_visible_ones_name_the_cell(hidden):
     def change(parts):
