@@ -37,9 +37,14 @@ def prepare_qr_slot(doc, guide, qr):
     # Text and images are checked by the shared Excel/PDF QR inserter. Also
     # protect vector table borders, annotations and unrelated links in PDFs.
     for drawing in page.get_drawings():
-        if drawing.get('fill') is not None and drawing['rect'].intersects(target):
+        fill=drawing.get('fill')
+        # Excel/Acrobat can paint empty cells as white rectangles. Keep that
+        # paint in place; text, images and borders are checked independently.
+        white_fill=fill is not None and all(component>=.999 for component in fill)
+        if (fill is not None and not white_fill and drawing.get('fill_opacity',1)>0
+                and drawing['rect'].intersects(target)):
             raise CertificateError('El espacio junto a «Escanee este QR» contiene un cuadro del PDF. No se cubrió su contenido.')
-        if drawing.get('color') is None:
+        if drawing.get('color') is None or drawing.get('stroke_opacity',1)==0:
             continue
         for item in drawing['items']:
             if item[0]=='re':

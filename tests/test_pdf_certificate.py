@@ -1,12 +1,14 @@
 """PDF-only flow: background and guided QR, with original content untouched."""
 
 from io import BytesIO
+import hashlib
 
 from fastapi.testclient import TestClient
 from PIL import Image
 import pymupdf
 import pytest
 import qrcode
+import zxingcpp
 
 from app.backgrounds import load_letterhead,verify_letterhead
 from app.documents import prepare_document
@@ -117,3 +119,66 @@ def test_invalid_pdf_background_does_not_allocate_drive_publication():
         response=client.post('/api/certificates',files={'pdf':('test.pdf',certificate_pdf())},
                              data={'tipoCertificado':'unknown'})
     assert response.status_code==422 and drive.token_requests==0 and list(drive.files)==[ROOT]
+
+
+@pytest.mark.parametrize('fill,opacity',[( (1,1,1),1),((0,0,0),0)])
+def test_empty_cell_paint_does_not_block_qr_or_change_original_content(synthetic_backgrounds,fill,opacity):
+    with pymupdf.open(stream=certificate_pdf(),filetype='pdf')as doc:
+        doc[0].draw_rect(pymupdf.Rect(140,620,216,710),color=None,fill=fill,fill_opacity=opacity,overlay=False)
+        source=doc.tobytes()
+    result=prepare_document(source,'pdf','','https://example.com/new',certificate_type='no_acreditado')
+    with pymupdf.open(stream=source,filetype='pdf')as old,pymupdf.open(stream=result.data,filetype='pdf')as new:
+        for before,after in zip(old,new,strict=True):
+            assert before.get_text('words')==after.get_text('words')
+            shapes=lambda page:[{k:v for k,v in d.items()if k!='seqno'}for d in page.get_drawings()]
+            assert shapes(before)==shapes(after)
+        assert len(new)==2 and result.stamp_pages==[1]
+
+
+@pytest.mark.parametrize('obstacle',['colored_fill','border','text','image'])
+def test_white_cell_still_protects_content_and_borders(synthetic_backgrounds,obstacle):
+    with pymupdf.open(stream=certificate_pdf(),filetype='pdf')as doc:
+        page=doc[0];area=pymupdf.Rect(150,640,210,670)
+        page.draw_rect(area,color=None,fill=(1,1,1))
+        if obstacle=='colored_fill':
+            page.draw_rect(area,color=None,fill=(.8,.8,.8))
+        elif obstacle=='border':
+            page.draw_rect(area,color=(0,0,0),fill=(1,1,1))
+        elif obstacle=='text':
+            page.insert_text((155,660),'KEEP',fontsize=8)
+        else:
+            image=BytesIO();Image.new('RGB',(60,30),'navy').save(image,format='PNG')
+            page.insert_image(area,stream=image.getvalue())
+        source=doc.tobytes()
+    with pytest.raises(CertificateError):
+        prepare_document(source,'pdf','','https://example.com/new',certificate_type='no_acreditado')
+
+
+@pytest.mark.parametrize('backend',['local','drive'])
+def test_republishing_same_pdf_keeps_each_qr_and_previous_file(tmp_path,synthetic_backgrounds,backend):
+    drive=FakeDrive()
+    app=(create_app(certificate_storage=drive.storage())if backend=='drive'
+         else create_app(tmp_path/'store','https://example.com'))
+    source=certificate_pdf();records=[]
+    with TestClient(app)as client:
+        for _ in range(2):
+            response=client.post('/api/certificates',files={'pdf':('same-name.pdf',source,'application/pdf')},
+                                 data={'tipoCertificado':'no_acreditado'})
+            assert response.status_code==201,response.text
+            info=response.json();data=client.get(info['downloadUrl']).content
+            assert hashlib.sha256(data).hexdigest()==info['sha256']
+            with pymupdf.open(stream=data,filetype='pdf')as doc:
+                area=[l['from']for l in doc[0].get_links()if l.get('uri')==info['verificationUrl']][0]
+                pixels=doc[0].get_pixmap(matrix=pymupdf.Matrix(3,3),clip=area)
+                decoded=zxingcpp.read_barcode(Image.open(BytesIO(pixels.tobytes('png'))))
+                assert decoded.text==info['verificationUrl']
+            records.append((info,data))
+        first,second=(row[0]for row in records)
+        assert first['id']!=second['id'] and first['verificationUrl']!=second['verificationUrl']
+        assert first['filename']==second['filename'] and first['finalCode']==second['finalCode']
+        for info,data in records:
+            assert client.get(info['downloadUrl']).content==data
+            assert client.get(f"/api/certificates/{info['id']}").json()['sha256']==info['sha256']
+        if backend=='drive':
+            assert first['driveFileId']!=second['driveFileId']
+            assert all(drive.files[info['driveFileId']]['content']==data for info,data in records)

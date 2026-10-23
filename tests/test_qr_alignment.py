@@ -9,12 +9,12 @@ from app.pdf import prepare_pdf,_template_guides,CertificateError
 from app.pdf_qr import instruction_block,verify_template_qr
 
 
-@pytest.mark.parametrize('gap',[10,16])
-def test_visible_qr_is_centered_with_the_complete_instruction_block(gap):
+@pytest.mark.parametrize('gap,fontsize,lines',[(10,8,5),(16,8,5),(8,6,4),(10,6,4)])
+def test_visible_qr_is_centered_with_the_complete_instruction_block(gap,fontsize,lines):
     with pymupdf.open() as source:
         page=source.new_page()
-        for i,text in enumerate(['Escanee este QR','Para descargar','el certificado original','con firma electrónica','en pdf']):
-            page.insert_text((220,300+i*gap),text,fontsize=8)
+        for i,text in enumerate(['Escanee este QR','Para descargar','el certificado original','con firma electrónica','en pdf'][:lines]):
+            page.insert_text((220,300+i*gap),text,fontsize=fontsize)
         result=prepare_pdf(source.tobytes(),'','https://drive.google.com/file/d/ALINEACION_FICTICIA/view',template=True)
     with pymupdf.open(stream=result.data,filetype='pdf') as doc:
         page=doc[0];block=instruction_block(page,_template_guides(page)[0])
