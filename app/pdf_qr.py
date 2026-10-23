@@ -72,7 +72,8 @@ def qr_position(page, guide, qr):
         visible_height = 66 * (bottom - top) / image.height
         # Short captions align at their top; multi-line instructions are
         # centered against the black/white square, excluding its quiet zone.
-        y = (block.y0 - 66 * top / image.height if block.height < visible_height * .65
+        multiline=block.y1>guide.y1+1
+        y = (block.y0 - 66 * top / image.height if not multiline and block.height < visible_height * .65
              else (block.y0 + block.y1) / 2 - 33)
     return pymupdf.Rect(guide.x0 - 72, y, guide.x0 - 6, y + 66)
 
