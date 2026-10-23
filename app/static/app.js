@@ -13,7 +13,7 @@ let certificateCodePattern = "";
 let maxCodeLength = 40;
 
 function needsBackground(file) {
-  return /\.xls[xm]$/i.test(file.name) && layouts.get(file)?.data?.needsBackground === true;
+  return /\.pdf$/i.test(file.name) || /\.xls[xm]$/i.test(file.name) && layouts.get(file)?.data?.needsBackground === true;
 }
 
 function hasBackground(file) {
@@ -35,7 +35,11 @@ function renderFiles() {
   $("file-list").replaceChildren();
   $("selection-summary").hidden = files.length === 0;
   $("file-count").textContent = `${files.length} ${files.length === 1 ? "archivo seleccionado" : "archivos seleccionados"}`;
+  const pdfOnly = files.length > 0 && files.every((file) => /\.pdf$/i.test(file.name));
+  $("signature-options").hidden = pdfOnly;
+  $("signature-hint").hidden = pdfOnly;
   files.forEach((file, index) => {
+    const isPdf = /\.pdf$/i.test(file.name);
     const row = document.createElement("div");
     row.className = "file-row";
     const top = document.createElement("div");
@@ -73,7 +77,7 @@ function renderFiles() {
     if (needsBackground(file)) {
       const typeLabel = document.createElement("label");
       typeLabel.className = "code-label type-label";
-      typeLabel.textContent = "Fondo para las hojas sin formato · obligatorio";
+      typeLabel.textContent = isPdf ? "Fondo del PDF · obligatorio" : "Fondo para las hojas sin formato · obligatorio";
       const select = document.createElement("select");
       select.id = `type-${index}`;
       select.className = "code-input type-select";
@@ -99,8 +103,13 @@ function renderFiles() {
       row.append(typeLabel, select);
       const hint = document.createElement("small");
       hint.className = "background-hint";
-      hint.textContent = "Conservaremos los formatos existentes. Este fondo solo se añadirá a las hojas que no tengan uno.";
+      hint.textContent = isPdf ? "Añadiremos el fondo a sus páginas y alinearemos el QR junto a «Escanee este QR». Sus textos, tablas y firma se conservan." :
+        "Conservaremos los formatos existentes. Este fondo solo se añadirá a las hojas que no tengan uno.";
       row.append(hint);
+    }
+    if (isPdf) {
+      $("file-list").append(row);
+      return;
     }
     const label = document.createElement("label");
     label.className = "code-label";
@@ -216,12 +225,13 @@ function addResult(file, result, error) {
     card.append(detail);
   } else {
     const detail = document.createElement("p");
-    detail.textContent = `${result.finalCode || "Sin código único detectado"} · ${result.signatureIncluded ? "Con imagen de firma" : "Sin firma añadida"}`;
+    detail.textContent = result.sourceType === "pdf" && result.backgroundVerified ? `${result.finalCode || "PDF"} · QR y fondo` :
+      `${result.finalCode || "Sin código único detectado"} · ${result.signatureIncluded ? "Con imagen de firma" : "Sin firma añadida"}`;
     card.append(detail);
     if (result.formatPreserved) {
       const preserved = document.createElement("p");
       preserved.className = "background-confirmation";
-      preserved.textContent = "Formato del Excel conservado · sin añadir otro fondo";
+      preserved.textContent = result.sourceType === "pdf" ? "Contenido y páginas del PDF conservados" : "Formato del Excel conservado · sin añadir otro fondo";
       card.append(preserved);
     }
     if (result.backgroundVerified) {
@@ -277,9 +287,9 @@ $("certificate-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (busy || !ready || !files.length) return;
   if (files.some((file) => !hasBackground(file))) {
-    return message("Espera la revisión del Excel y elige un fondo para las hojas que no tengan formato propio.");
+    return message("Elige el fondo de cada PDF y espera la revisión del formato de los Excel.");
   }
-  const signature = $("signature").files[0];
+  const signature = files.some((file) => /\.xls[xm]$/i.test(file.name)) ? $("signature").files[0] : undefined;
   if (files.some((file) => { const footer = formatFooters.get(file); return footer && Boolean(footer.code.trim()) !== Boolean(footer.version.trim()); })) {
     return message("Completa el código y la versión del formato, o deja ambos vacíos para conservar lo disponible en el Excel.");
   }
@@ -307,17 +317,18 @@ $("certificate-form").addEventListener("submit", async (event) => {
       updateProgress();
       const timer = setInterval(updateProgress, 1000);
       const form = new FormData();
+      const isExcel = /\.xls[xm]$/i.test(file.name);
       const uploadToken = layouts.get(file)?.data?.uploadToken;
       if (uploadToken) form.append("excelToken", uploadToken);
       else form.append(/\.xls[xm]$/i.test(file.name) ? "excel" : "pdf", file);
-      form.append("codigoCorrecto", (codes.get(file) || "").trim());
+      if (isExcel) form.append("codigoCorrecto", (codes.get(file) || "").trim());
       if (needsBackground(file)) form.append("tipoCertificado", certificateTypes.get(file));
       const footer = formatFooters.get(file);
       if (footer?.code.trim() && footer?.version.trim()) {
         form.append("codigoFormato", footer.code.trim());
         form.append("versionFormato", footer.version.trim());
       }
-      if (signature) form.append("firma", signature);
+      if (signature && isExcel) form.append("firma", signature);
       try {
         let response = await fetch("/api/certificates", { method: "POST", body: form });
         if (response.status === 410 && uploadToken) {

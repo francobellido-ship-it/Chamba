@@ -224,6 +224,9 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
         if sum((excel is not None, pdf is not None, bool(excelToken))) != 1:
             raise HTTPException(422, "Sube un Excel .xlsx, .xlsm o un PDF por solicitud.")
         source_type = "xlsx" if excel or excelToken else "pdf"
+        pdf_only=source_type=='pdf' and bool(tipoCertificado)
+        if pdf_only:
+            codigoCorrecto=''
         if excelToken:
             cached = await asyncio.to_thread(inspections.get, excelToken)
             if cached is None:
@@ -249,7 +252,12 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                     require_background_type(tipoCertificado)
             except CertificateError as exc:
                 raise HTTPException(422, str(exc)) from exc
-        signature = await read_upload(firma, MAX_SIGNATURE_BYTES) if firma else None
+        elif pdf_only:
+            try:
+                require_background_type(tipoCertificado)
+            except CertificateError as exc:
+                raise HTTPException(422,str(exc))from exc
+        signature = await read_upload(firma, MAX_SIGNATURE_BYTES) if firma and not pdf_only else None
         certificate_id = str(uuid4())
         inspected = perf_counter()
         try:
@@ -275,7 +283,7 @@ def create_app(storage_dir: Path | None = None, public_url: str | None = None,
                     "sha256": hashlib.sha256(result.data).hexdigest(),
                     "verificationUrl": verification_url,
                     "downloadUrl": f"/api/certificates/{certificate_id}/download"}
-            if source_type == "xlsx":
+            if source_type == "xlsx" or pdf_only:
                 info.update(certificateType=result.certificate_type, backgroundVerified=bool(result.background_pages),
                             backgroundPages=result.background_pages, formatPreserved=result.format_preserved,
                             sheetName=result.sheet_name, formatFooterVerified=result.format_footer_verified)

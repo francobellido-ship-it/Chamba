@@ -55,3 +55,14 @@ def compact_backgrounds(doc: pymupdf.Document, digests: tuple[bytes, ...]) -> No
         if compact != original:
             doc.update_stream(xref, compact, compress=False)
             doc.xref_set_key(xref, "Filter", "/DCTDecode")
+
+
+def clear_image_paint(doc, xref):
+    """Replace an image's paint with an empty form, leaving text paths intact.
+
+    Unlike delete_image's transparent placeholder, this has no image rectangle
+    that could be mistaken for an obstacle under a replacement QR/background.
+    Callers must ensure every use of this image is intended to be removed.
+    """
+    doc.update_object(xref,'<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources << >> >>')
+    doc.update_stream(xref,b'')

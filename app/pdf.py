@@ -153,7 +153,10 @@ def _stamp_position(page: pymupdf.Page, with_signature: bool) -> pymupdf.Rect | 
 
 def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
                 signature: bytes | None = None, template: bool = False,
-                background_digests: tuple[bytes, ...] = (), automatic_qr: bool = False) -> PreparedPDF:
+                background_digests: tuple[bytes, ...] = (), automatic_qr: bool = False,
+                letterhead=None) -> PreparedPDF:
+    if letterhead is not None:
+        requested_code,signature,template,automatic_qr='',None,True,False
     requested_code = normalized_code(requested_code)
     if not data.startswith(b"%PDF-"):
         raise CertificateError("El archivo no es un PDF válido.")
@@ -170,6 +173,10 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         for page in doc:
             if any(widget.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE for widget in (page.widgets() or [])):
                 raise CertificateError("Este PDF contiene un campo de firma digital. No se modificará para preservar su firma.")
+        if letterhead is not None:
+            from app.backgrounds import apply_letterhead
+            apply_letterhead(doc,letterhead,preserve_page_size=True,verify=False)
+            background_digests=(letterhead.digest,)
         original_text = "\n".join(page.get_text() for page in doc)
         raw_codes = list(dict.fromkeys(code.upper() for code in CODE.findall(original_text)))
         codes = list(dict.fromkeys(re.sub(r"\s+", "", code) for code in raw_codes))
@@ -206,6 +213,11 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
         if template:
             from app.pdf_qr import verify_template_qr
             guides = _template_guides(doc[0])
+            if letterhead is not None:
+                if len(guides)!=1:
+                    raise CertificateError('El PDF necesita una única indicación «Escanee este QR» legible en la primera página para colocar el QR sin mover su contenido.')
+                from app.pdf_certificate import prepare_qr_slot
+                prepare_qr_slot(doc,guides[0],qr_buffer.getvalue())
             if not guides:
                 qr_area, inserted = _replace_existing_template_qr(doc, qr_buffer.getvalue(), verification_url, signature,
                                                                  background_digests, automatic_qr)
@@ -235,12 +247,24 @@ def prepare_pdf(data: bytes, requested_code: str, verification_url: str,
             warnings.append("No había espacio libre suficiente. El QR y la firma opcional se colocaron en una página adicional.")
         elif not template and len(stamped_pages) < original_pages:
             warnings.append("El QR y la firma opcional se insertaron solo en las páginas con espacio libre.")
+        if letterhead is not None:
+            from app.pdf_images import compact_backgrounds
+            compact_backgrounds(doc,background_digests)
         result = doc.tobytes(garbage=4, deflate=True, use_objstms=1,
                              encryption=pymupdf.PDF_ENCRYPT_NONE)
+        background_pages=[]
         if template:
             with pymupdf.open(stream=result,filetype='pdf') as final:
                 verify_template_qr(final, qr_area, verification_url, qr_buffer.getvalue(), guides[0] if guides else None)
-        return PreparedPDF(result, codes, final_code, replacements, warnings, stamped_pages, bool(signature))
+                if letterhead is not None:
+                    from app.backgrounds import verify_letterhead
+                    background_pages=verify_letterhead(final,letterhead,preserve_page_size=True)
+        prepared=PreparedPDF(result, codes, final_code, replacements, warnings, stamped_pages, bool(signature))
+        if letterhead is not None:
+            prepared.certificate_type=letterhead.kind
+            prepared.background_pages=background_pages
+            prepared.format_preserved=True
+        return prepared
 
 
 def _replace_existing_template_qr(doc: pymupdf.Document, qr: bytes, url: str,
