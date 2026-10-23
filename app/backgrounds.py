@@ -40,7 +40,7 @@ def background_choices() -> list[dict]:
 
 def require_background_type(kind: str) -> str:
     if kind not in TEMPLATES:
-        raise CertificateError("Selecciona Acreditado o No acreditado para cada Excel.")
+        raise CertificateError("Selecciona Acreditado o No acreditado para este archivo.")
     _, path, checksum = TEMPLATES[kind]
     if not checksum or not path.is_file():
         raise CertificateError("El fondo oficial seleccionado todavía no está disponible. Contacta al administrador.")
@@ -85,33 +85,42 @@ def _opaque_page_image(info: dict, page: pymupdf.Page) -> bool:
             and pymupdf.Rect(info["bbox"]).get_area() > page.rect.get_area() * 0.9)
 
 
-def apply_letterhead(doc: pymupdf.Document, selected: Letterhead) -> None:
+def apply_letterhead(doc: pymupdf.Document, selected: Letterhead, *, preserve_page_size=False, verify=True) -> None:
     known = {load_letterhead(choice["value"]).digest for choice in background_choices() if choice["available"]}
     remove = {}
     for index, page in enumerate(doc):
-        _check_page_size(page)
+        if not preserve_page_size:
+            _check_page_size(page)
+        elif page.rotation:
+            raise CertificateError("El PDF debe tener sus páginas sin giro para colocar el fondo y el QR.")
         for info in page.get_image_info(hashes=True, xrefs=True):
             if info["digest"] in known:
                 if not info["xref"]:
-                    raise CertificateError("El Excel contiene un fondo que no se puede reemplazar. Revisa la plantilla.")
+                    raise CertificateError("El archivo contiene un fondo que no se puede reemplazar. Revisa la plantilla.")
                 remove.setdefault(info["xref"], index)
             elif _opaque_page_image(info, page):
-                raise CertificateError("El Excel contiene una imagen de página completa que puede tapar el fondo. Revisa la plantilla.")
+                raise CertificateError("El archivo contiene una imagen de página completa que puede tapar el fondo. Revisa la plantilla.")
     for xref, page_index in remove.items():
-        doc[page_index].delete_image(xref)
+        if preserve_page_size:
+            from app.pdf_images import clear_image_paint
+            clear_image_paint(doc,xref)
+        else:
+            doc[page_index].delete_image(xref)
     background_xref = 0
     for page in doc:
         background_xref = page.insert_image(page.rect, stream=selected.data if not background_xref else None,
-                                            xref=background_xref, overlay=False)
-    verify_letterhead(doc, selected)
+                                            xref=background_xref, overlay=False, keep_proportion=not preserve_page_size)
+    if verify:
+        verify_letterhead(doc, selected, preserve_page_size=preserve_page_size)
 
 
-def verify_letterhead(doc: pymupdf.Document, selected: Letterhead, pages: tuple[int, ...] | None = None) -> list[int]:
+def verify_letterhead(doc: pymupdf.Document, selected: Letterhead, pages: tuple[int, ...] | None = None, *, preserve_page_size=False) -> list[int]:
     verified = []
     for index, page in enumerate(doc):
         if pages is not None and index + 1 not in pages:
             continue
-        _check_page_size(page)
+        if not preserve_page_size:
+            _check_page_size(page)
         images = page.get_image_info(hashes=True, xrefs=True)
         matches = [info for info in images if info["digest"] == selected.digest]
         if len(matches) != 1:

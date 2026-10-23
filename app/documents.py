@@ -10,7 +10,7 @@ import pymupdf
 def prepare_document(data: bytes, source_type: str, requested_code: str,
                      verification_url: str, signature: bytes | None = None,
                      certificate_type: str = "", format_code: str = '', format_version: str = '') -> PreparedPDF:
-    requested_code = normalized_code(requested_code)
+    requested_code = normalized_code(requested_code) if source_type=='xlsx' or not certificate_type else ''
     if source_type == "xlsx":
         # Validate the optional replacement before starting the Office conversion.
         signature = signature_png(signature)
@@ -37,6 +37,7 @@ def prepare_document(data: bytes, source_type: str, requested_code: str,
         if not result.detected_codes:
             raise CertificateError("No se pudo verificar el código del certificado en la hoja impresa. Revisa ese dato esencial antes de emitirlo.")
         return result
-    result = prepare_pdf(data, requested_code, verification_url, signature)
+    result = prepare_pdf(data, requested_code, verification_url, signature,
+                         letterhead=load_letterhead(certificate_type) if certificate_type else None)
     pymupdf.TOOLS.store_shrink(100)
     return result
